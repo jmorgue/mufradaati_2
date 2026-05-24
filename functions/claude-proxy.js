@@ -1,9 +1,14 @@
-export async function onRequestPost({ request }) {
+export async function onRequestPost(context) {
+  const request = context.request;
   const apiKey = request.headers.get("x-api-key");
+  
   if (!apiKey) {
     return new Response(JSON.stringify({ error: { message: "No API key provided" } }), {
       status: 400,
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" }
+      headers: { 
+        "Access-Control-Allow-Origin": "*", 
+        "Content-Type": "application/json" 
+      }
     });
   }
 
@@ -16,17 +21,25 @@ export async function onRequestPost({ request }) {
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json"
       },
-      body
+      body: body
     });
-    const data = await response.text();
-    return new Response(data, {
+
+    const responseText = await response.text();
+    
+    return new Response(responseText, {
       status: response.status,
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" }
+      headers: { 
+        "Access-Control-Allow-Origin": "*", 
+        "Content-Type": "application/json" 
+      }
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: { message: e.message } }), {
       status: 500,
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" }
+      headers: { 
+        "Access-Control-Allow-Origin": "*", 
+        "Content-Type": "application/json" 
+      }
     });
   }
 }
