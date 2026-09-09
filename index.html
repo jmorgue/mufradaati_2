@@ -1,0 +1,1124 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Vocabulaire</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇫🇷</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --ink:#212C3D;
+    --ink-soft:#4A5568;
+    --paper:#F1EDE2;
+    --paper-raised:#FBFAF4;
+    --card:#FFFFFF;
+    --border:#DCD4BE;
+    --berry:#96354E;
+    --berry-dark:#7A2A40;
+    --gold:#AD8A3C;
+    --sage:#6B8068;
+    --sage-bg:#E7EDE3;
+    --danger:#B24A3D;
+    --danger-bg:#F5E4DF;
+    --radius:14px;
+    --radius-sm:8px;
+    --shadow:0 1px 2px rgba(33,44,61,.06), 0 6px 20px rgba(33,44,61,.06);
+    --font-display:'Fraunces', Georgia, serif;
+    --font-body:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--font-body);
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .hidden{display:none !important;}
+  button{font-family:inherit;cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+
+  /* ---------- Auth screen ---------- */
+  #auth-screen{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+  }
+  .auth-box{
+    width:100%;
+    max-width:380px;
+    background:var(--paper-raised);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:36px 30px;
+    box-shadow:var(--shadow);
+  }
+  .auth-box h1{
+    font-family:var(--font-display);
+    font-weight:500;
+    font-size:34px;
+    margin:0 0 4px;
+    color:var(--ink);
+    letter-spacing:-.01em;
+  }
+  .auth-box .tagline{
+    color:var(--ink-soft);
+    font-size:14px;
+    margin:0 0 28px;
+  }
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block;
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--ink-soft);
+    margin-bottom:6px;
+  }
+  .field input, .field select, .field textarea{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    background:var(--card);
+    color:var(--ink);
+    font-size:15px;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{
+    outline:none;
+    border-color:var(--berry);
+  }
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    padding:11px 18px;
+    border-radius:var(--radius-sm);
+    border:1px solid transparent;
+    font-size:14.5px;
+    font-weight:600;
+    transition:opacity .12s ease;
+  }
+  .btn:active{opacity:.8;}
+  .btn-primary{background:var(--berry);color:#fff;}
+  .btn-primary:hover{background:var(--berry-dark);}
+  .btn-secondary{background:var(--card);color:var(--ink);border-color:var(--border);}
+  .btn-secondary:hover{background:var(--paper);}
+  .btn-ghost{background:transparent;color:var(--ink-soft);}
+  .btn-danger{background:var(--danger-bg);color:var(--danger);}
+  .btn-block{width:100%;}
+  .btn-sm{padding:7px 12px;font-size:13px;}
+  .auth-toggle{
+    text-align:center;
+    margin-top:18px;
+    font-size:13.5px;
+    color:var(--ink-soft);
+  }
+  .auth-toggle a{color:var(--berry);text-decoration:none;font-weight:600;cursor:pointer;}
+  .auth-error{
+    background:var(--danger-bg);
+    color:var(--danger);
+    padding:9px 12px;
+    border-radius:var(--radius-sm);
+    font-size:13px;
+    margin-bottom:14px;
+  }
+
+  /* ---------- App shell ---------- */
+  #app{
+    max-width:560px;
+    margin:0 auto;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    padding-bottom:76px;
+  }
+  header.appbar{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    padding:22px 20px 14px;
+  }
+  header.appbar .brand{
+    font-family:var(--font-display);
+    font-size:24px;
+    font-weight:500;
+    color:var(--ink);
+  }
+  header.appbar .who{
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  main{flex:1;padding:0 20px 30px;}
+  .view{animation:fade .15s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+
+  h2.view-title{
+    font-family:var(--font-display);
+    font-weight:500;
+    font-size:22px;
+    margin:4px 0 18px;
+    color:var(--ink);
+  }
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:18px;
+    margin-bottom:14px;
+  }
+
+  /* Home */
+  .hero-card{
+    background:linear-gradient(135deg, var(--berry) 0%, var(--berry-dark) 100%);
+    color:#fff;
+    border-radius:var(--radius);
+    padding:24px 20px;
+    margin-bottom:18px;
+  }
+  .hero-card .big-num{
+    font-family:var(--font-display);
+    font-size:44px;
+    font-weight:500;
+    line-height:1;
+  }
+  .hero-card .label{font-size:13.5px;opacity:.9;margin-top:4px;}
+  .hero-card .btn{margin-top:16px;background:#fff;color:var(--berry-dark);}
+  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .stat-box{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    padding:12px 10px;
+    text-align:center;
+  }
+  .stat-box .n{font-family:var(--font-display);font-size:22px;color:var(--ink);}
+  .stat-box .l{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+
+  /* Review */
+  .flashcard{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:40px 24px;
+    text-align:center;
+    min-height:280px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    box-shadow:var(--shadow);
+  }
+  .badge{
+    display:inline-block;
+    font-size:11px;
+    font-weight:600;
+    padding:3px 9px;
+    border-radius:20px;
+    background:var(--paper);
+    color:var(--ink-soft);
+    border:1px solid var(--border);
+    margin-bottom:14px;
+  }
+  .flashcard .word-fr{
+    font-family:var(--font-display);
+    font-size:38px;
+    font-weight:500;
+    color:var(--ink);
+    line-height:1.15;
+  }
+  .flashcard .word-meta{font-size:13px;color:var(--ink-soft);margin-top:6px;}
+  .flashcard .divider{width:36px;height:1px;background:var(--border);margin:20px 0;}
+  .flashcard .word-en{font-size:20px;color:var(--ink);}
+  .flashcard .example{
+    font-size:14px;
+    color:var(--ink-soft);
+    margin-top:14px;
+    font-style:italic;
+    line-height:1.5;
+  }
+  .review-actions{display:flex;gap:10px;margin-top:16px;}
+  .review-actions .btn{flex:1;padding:14px;font-size:15px;}
+  .progress-bar{height:4px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:16px;}
+  .progress-bar .fill{height:100%;background:var(--berry);transition:width .2s ease;}
+  .empty-state{
+    text-align:center;
+    padding:60px 20px;
+    color:var(--ink-soft);
+  }
+  .empty-state .emoji{font-size:38px;margin-bottom:10px;}
+
+  /* Add */
+  .subtab-row{display:flex;gap:8px;margin-bottom:18px;}
+  .subtab{
+    flex:1;
+    padding:9px;
+    text-align:center;
+    border-radius:var(--radius-sm);
+    border:1px solid var(--border);
+    background:var(--card);
+    font-size:13.5px;
+    font-weight:600;
+    color:var(--ink-soft);
+  }
+  .subtab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .gen-card{
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    padding:12px;
+    margin-bottom:10px;
+    background:var(--paper-raised);
+  }
+  .gen-card .gc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .gen-card .gc-fr{font-family:var(--font-display);font-size:18px;}
+  .gen-card input[type=text]{font-size:13px;padding:6px 8px;margin-top:4px;}
+  .gen-card .gc-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}
+  .gen-card .gc-label{font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
+
+  /* Levels */
+  .level-card{margin-bottom:12px;}
+  .level-head{display:flex;align-items:center;justify-content:space-between;}
+  .level-head .lname{font-family:var(--font-display);font-size:18px;}
+  .level-head .lcadence{font-size:12px;color:var(--ink-soft);}
+  .level-counts{display:flex;gap:16px;margin-top:10px;font-size:13px;color:var(--ink-soft);}
+  .level-counts b{color:var(--ink);font-weight:600;}
+  .level-actions{display:flex;gap:8px;margin-top:12px;}
+  .queue-group{
+    border-top:1px solid var(--border);
+    margin-top:12px;
+    padding-top:12px;
+  }
+  .queue-date-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 0;
+    font-size:13.5px;
+    border-bottom:1px solid var(--paper);
+  }
+  .queue-date-row:last-child{border-bottom:none;}
+  .word-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:9px 0;
+    border-bottom:1px solid var(--paper);
+    font-size:14px;
+  }
+  .word-row:last-child{border-bottom:none;}
+  .word-row .wf{font-weight:600;}
+  .word-row .we{color:var(--ink-soft);font-size:12.5px;}
+  details.mini{margin-top:10px;}
+  details.mini summary{font-size:12.5px;color:var(--berry);cursor:pointer;font-weight:600;list-style:none;}
+  details.mini summary::-webkit-details-marker{display:none;}
+
+  /* Family lookup */
+  .family-tabs{display:flex;gap:6px;margin:16px 0 12px;}
+  .family-tab{
+    padding:7px 13px;
+    border-radius:20px;
+    border:1px solid var(--border);
+    background:var(--card);
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--ink-soft);
+  }
+  .family-tab.active{background:var(--gold);color:#fff;border-color:var(--gold);}
+  .conj-table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  .conj-table td{padding:6px 4px;border-bottom:1px solid var(--paper);}
+  .conj-table td:first-child{color:var(--ink-soft);width:40%;}
+  .fam-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:10px 0;
+    border-bottom:1px solid var(--paper);
+  }
+  .fam-item:last-child{border-bottom:none;}
+  .fam-item .fi-word{font-weight:600;}
+  .fam-item .fi-meta{font-size:12px;color:var(--ink-soft);}
+
+  /* Tab bar */
+  #tabbar{
+    position:fixed;
+    bottom:0;left:0;right:0;
+    background:var(--paper-raised);
+    border-top:1px solid var(--border);
+    display:flex;
+    max-width:560px;
+    margin:0 auto;
+  }
+  .tab-btn{
+    flex:1;
+    background:none;
+    border:none;
+    padding:10px 4px 8px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:3px;
+    font-size:10.5px;
+    font-weight:600;
+    color:var(--ink-soft);
+  }
+  .tab-btn .ic{font-size:19px;}
+  .tab-btn.active{color:var(--berry);}
+
+  #toast{
+    position:fixed;
+    bottom:88px;
+    left:50%;
+    transform:translateX(-50%);
+    background:var(--ink);
+    color:#fff;
+    padding:10px 18px;
+    border-radius:20px;
+    font-size:13.5px;
+    z-index:50;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(-4px);}
+
+  .checkbox-row{display:flex;align-items:center;gap:8px;}
+  .checkbox-row input{width:auto;}
+
+  .spinner{
+    width:16px;height:16px;
+    border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff;
+    border-radius:50%;
+    animation:spin .7s linear infinite;
+    display:inline-block;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<div id="auth-screen">
+  <div class="auth-box">
+    <h1>Vocabulaire</h1>
+    <p class="tagline">Boîtes de Leitner pour le français</p>
+    <div id="auth-error" class="auth-error hidden"></div>
+
+    <div id="login-form">
+      <div class="field"><label>Nom d'utilisateur</label><input type="text" id="login-username" autocomplete="username"></div>
+      <div class="field"><label>Code PIN</label><input type="password" inputmode="numeric" id="login-pin" autocomplete="current-password"></div>
+      <button class="btn btn-primary btn-block" onclick="doLogin()">Se connecter</button>
+      <div class="auth-toggle">Pas de compte ? <a onclick="toggleAuth()">Créer un compte</a></div>
+    </div>
+
+    <div id="register-form" class="hidden">
+      <div class="field"><label>Choisis un nom d'utilisateur</label><input type="text" id="reg-username"></div>
+      <div class="field"><label>Choisis un code PIN</label><input type="password" inputmode="numeric" id="reg-pin"></div>
+      <button class="btn btn-primary btn-block" onclick="doRegister()">Créer le compte</button>
+      <div class="auth-toggle">Déjà un compte ? <a onclick="toggleAuth()">Se connecter</a></div>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header class="appbar">
+    <div class="brand">Vocabulaire</div>
+    <div class="who" id="who-label"></div>
+  </header>
+
+  <main>
+    <section id="view-home" class="view"></section>
+    <section id="view-review" class="view hidden"></section>
+    <section id="view-add" class="view hidden"></section>
+    <section id="view-levels" class="view hidden"></section>
+    <section id="view-family" class="view hidden"></section>
+    <section id="view-settings" class="view hidden"></section>
+  </main>
+
+  <nav id="tabbar">
+    <button class="tab-btn" data-view="home" onclick="showView('home')"><span class="ic">🏠</span>Accueil</button>
+    <button class="tab-btn" data-view="review" onclick="showView('review')"><span class="ic">🗂️</span>Réviser</button>
+    <button class="tab-btn" data-view="add" onclick="showView('add')"><span class="ic">➕</span>Ajouter</button>
+    <button class="tab-btn" data-view="levels" onclick="showView('levels')"><span class="ic">📶</span>Niveaux</button>
+    <button class="tab-btn" data-view="family" onclick="showView('family')"><span class="ic">🌿</span>Familles</button>
+    <button class="tab-btn" data-view="settings" onclick="showView('settings')"><span class="ic">⚙️</span>Réglages</button>
+  </nav>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   CONFIG — fill these in before deploying
+   ========================================================= */
+const SUPABASE_URL = "https://kznotnbrppypsxzdmlzf.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_BTFH1PvDiANP-LkCgbH1fQ_JCh2Rc4T";
+const WORKER_PROXY_URL = "YOUR_CLOUDFLARE_WORKER_URL"; // can reuse the same generic proxy Mufradaati uses
+const AI_MODEL = "claude-sonnet-4-6";
+
+/* ========================================================= */
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const LEVELS = [
+  {id:1, label:"Niveau 1", cadence:"Tous les jours"},
+  {id:2, label:"Niveau 2", cadence:"Un jour sur deux"},
+  {id:3, label:"Niveau 3", cadence:"Dimanche et mercredi"},
+  {id:4, label:"Niveau 4", cadence:"Le dimanche"},
+  {id:5, label:"Niveau 5", cadence:"Un dimanche sur deux"},
+];
+const TYPE_LABELS = {nom:"nom", verbe:"verbe", adjectif:"adjectif", adverbe:"adverbe", expression:"expression"};
+
+let state = {
+  user: null,
+  apiKey: null,
+  words: [],      // {id, french, english, word_type, gender, plural, principal_parts, example, example_translation}
+  progress: [],   // {id, word_id, status, level, next_review, queued_at}
+  currentTab: "home",
+  reviewQueue: [],
+  reviewIndex: 0,
+  reviewFlipped: false,
+  reviewScore: {correct:0, total:0},
+  addSubtab: "single",
+  bulkGenerated: [],
+  familyResult: null,
+  familyTab: "conjugation",
+};
+
+/* ---------- helpers ---------- */
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function addDays(dateStrOrDate, n){
+  const d = typeof dateStrOrDate === "string" ? new Date(dateStrOrDate+"T00:00:00") : new Date(dateStrOrDate);
+  d.setDate(d.getDate()+n);
+  return d;
+}
+function nextWeekday(date, targetDow){
+  const d = new Date(date);
+  do { d.setDate(d.getDate()+1); } while(d.getDay() !== targetDow);
+  return d;
+}
+function toISODate(d){ return d.toISOString().slice(0,10); }
+function computeNextReview(level, fromDateStr){
+  const from = new Date(fromDateStr+"T00:00:00");
+  let d;
+  if(level===1) d = addDays(from,1);
+  else if(level===2) d = addDays(from,2);
+  else if(level===3){
+    const sun = nextWeekday(from,0), wed = nextWeekday(from,3);
+    d = sun < wed ? sun : wed;
+  }
+  else if(level===4) d = nextWeekday(from,0);
+  else if(level===5) d = addDays(nextWeekday(from,0),7);
+  else d = from;
+  return toISODate(d);
+}
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(()=>t.classList.remove("show"), 2400);
+}
+async function sha256(text){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function wordById(id){ return state.words.find(w=>w.id===id); }
+function articleFor(w){
+  if(w.word_type!=="nom") return "";
+  if(w.gender==="m") return "le ";
+  if(w.gender==="f") return "la ";
+  return "";
+}
+
+/* ---------- auth ---------- */
+function toggleAuth(){
+  document.getElementById("login-form").classList.toggle("hidden");
+  document.getElementById("register-form").classList.toggle("hidden");
+  document.getElementById("auth-error").classList.add("hidden");
+}
+function showAuthError(msg){
+  const el = document.getElementById("auth-error");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+async function doRegister(){
+  const username = document.getElementById("reg-username").value.trim();
+  const pin = document.getElementById("reg-pin").value.trim();
+  if(!username || !pin){ showAuthError("Remplis les deux champs."); return; }
+  const { data: existing } = await sb.from("users").select("id").eq("username", username).maybeSingle();
+  if(existing){ showAuthError("Ce nom d'utilisateur existe déjà."); return; }
+  const pin_hash = await sha256(pin);
+  const { data, error } = await sb.from("users").insert({username, pin_hash}).select().single();
+  if(error){ showAuthError("Erreur : "+error.message); return; }
+  await onLoggedIn(data);
+}
+async function doLogin(){
+  const username = document.getElementById("login-username").value.trim();
+  const pin = document.getElementById("login-pin").value.trim();
+  if(!username || !pin){ showAuthError("Remplis les deux champs."); return; }
+  const pin_hash = await sha256(pin);
+  const { data, error } = await sb.from("users").select("*").eq("username", username).maybeSingle();
+  if(error || !data || data.pin_hash !== pin_hash){ showAuthError("Nom d'utilisateur ou PIN incorrect."); return; }
+  await onLoggedIn(data);
+}
+function doLogout(){
+  localStorage.removeItem("vocab_fr_uid");
+  state.user = null;
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("auth-screen").classList.remove("hidden");
+}
+async function onLoggedIn(userRow){
+  state.user = userRow;
+  state.apiKey = userRow.api_key || null;
+  localStorage.setItem("vocab_fr_uid", userRow.id);
+  document.getElementById("auth-screen").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  document.getElementById("who-label").textContent = userRow.username;
+  await loadUserData();
+  showView("home");
+}
+async function tryAutoLogin(){
+  const uid = localStorage.getItem("vocab_fr_uid");
+  if(!uid) return;
+  const { data } = await sb.from("users").select("*").eq("id", uid).maybeSingle();
+  if(data) await onLoggedIn(data);
+}
+
+/* ---------- data loading ---------- */
+async function loadUserData(){
+  const uid = state.user.id;
+  const [{data: words}, {data: progress}] = await Promise.all([
+    sb.from("user_words").select("*").eq("user_id", uid),
+    sb.from("progress").select("*").eq("user_id", uid),
+  ]);
+  state.words = words || [];
+  state.progress = progress || [];
+}
+
+/* ---------- navigation ---------- */
+function showView(name){
+  state.currentTab = name;
+  document.querySelectorAll(".view").forEach(v=>v.classList.add("hidden"));
+  document.getElementById("view-"+name).classList.remove("hidden");
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active", b.dataset.view===name));
+  if(name==="home") renderHome();
+  if(name==="review") startReviewSession();
+  if(name==="add") renderAdd();
+  if(name==="levels") renderLevels();
+  if(name==="family") renderFamily();
+  if(name==="settings") renderSettings();
+}
+
+/* ---------- HOME ---------- */
+function renderHome(){
+  const today = todayStr();
+  const dueCount = state.progress.filter(p=>p.status==="active" && p.next_review<=today).length;
+  const activeCount = state.progress.filter(p=>p.status==="active").length;
+  const queuedCount = state.progress.filter(p=>p.status==="queued").length;
+  const masteredCount = state.progress.filter(p=>p.status==="mastered").length;
+  document.getElementById("view-home").innerHTML = `
+    <div class="hero-card">
+      <div class="label">À réviser aujourd'hui</div>
+      <div class="big-num">${dueCount}</div>
+      <button class="btn" onclick="showView('review')">Commencer la révision</button>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="n">${state.words.length}</div><div class="l">mots au total</div></div>
+      <div class="stat-box"><div class="n">${activeCount}</div><div class="l">actifs</div></div>
+      <div class="stat-box"><div class="n">${queuedCount}</div><div class="l">en attente</div></div>
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <div style="font-weight:600;margin-bottom:8px;">Répartition par niveau</div>
+      ${LEVELS.map(l=>{
+        const active = state.progress.filter(p=>p.status==="active" && p.level===l.id).length;
+        const queued = state.progress.filter(p=>p.status==="queued" && p.level===l.id).length;
+        return `<div class="word-row"><span>${l.label}</span><span class="we">${active} actifs · ${queued} en attente</span></div>`;
+      }).join("")}
+      <div class="word-row"><span>Maîtrisé</span><span class="we">${masteredCount} mots</span></div>
+    </div>
+  `;
+}
+
+/* ---------- REVIEW ---------- */
+function startReviewSession(){
+  const today = todayStr();
+  const due = state.progress.filter(p=>p.status==="active" && p.next_review<=today);
+  state.reviewQueue = due.map(p=>p.id).sort(()=>Math.random()-0.5);
+  state.reviewIndex = 0;
+  state.reviewFlipped = false;
+  state.reviewScore = {correct:0, total:0};
+  renderReview();
+}
+function renderReview(){
+  const el = document.getElementById("view-review");
+  if(state.reviewQueue.length===0){
+    el.innerHTML = `<h2 class="view-title">Réviser</h2>
+      <div class="empty-state">
+        <div class="emoji">🎉</div>
+        <div>Rien à réviser aujourd'hui.</div>
+        <div style="font-size:12.5px;margin-top:6px;">Regarde l'onglet Niveaux pour promouvoir des mots en attente.</div>
+      </div>`;
+    return;
+  }
+  if(state.reviewIndex >= state.reviewQueue.length){
+    const s = state.reviewScore;
+    el.innerHTML = `<h2 class="view-title">Session terminée</h2>
+      <div class="card" style="text-align:center;padding:30px 18px;">
+        <div style="font-family:var(--font-display);font-size:30px;">${s.correct} / ${s.total}</div>
+        <div style="color:var(--ink-soft);font-size:13.5px;margin-top:4px;">bonnes réponses</div>
+        <button class="btn btn-primary" style="margin-top:18px;" onclick="startReviewSession()">Recommencer</button>
+      </div>`;
+    return;
+  }
+  const progId = state.reviewQueue[state.reviewIndex];
+  const prog = state.progress.find(p=>p.id===progId);
+  const w = wordById(prog.word_id);
+  const pct = Math.round((state.reviewIndex/state.reviewQueue.length)*100);
+
+  let backHtml = "";
+  if(state.reviewFlipped){
+    backHtml = `
+      <div class="divider"></div>
+      <div class="word-en">${w.english}</div>
+      ${w.plural ? `<div class="word-meta">pluriel : ${w.plural}</div>` : ""}
+      ${w.principal_parts ? `<div class="word-meta">${w.principal_parts}</div>` : ""}
+      ${w.example ? `<div class="example">« ${w.example} »<br>${w.example_translation||""}</div>` : ""}
+    `;
+  }
+
+  el.innerHTML = `
+    <h2 class="view-title">Réviser</h2>
+    <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
+    <div class="flashcard">
+      <span class="badge">${TYPE_LABELS[w.word_type]||w.word_type} · Niveau ${prog.level}</span>
+      <div class="word-fr">${articleFor(w)}${w.french}</div>
+      ${w.gender && w.word_type==="nom" ? `<div class="word-meta">${w.gender==="m"?"masculin":"féminin"}</div>` : ""}
+      ${backHtml}
+    </div>
+    ${state.reviewFlipped
+      ? `<div class="review-actions">
+           <button class="btn btn-danger" onclick="answerCard(false)">❌ Je ne savais pas</button>
+           <button class="btn" style="background:var(--sage);color:#fff;" onclick="answerCard(true)">✅ Je savais</button>
+         </div>`
+      : `<button class="btn btn-secondary btn-block" style="margin-top:16px;" onclick="flipCard()">Voir la réponse</button>`
+    }
+  `;
+}
+function flipCard(){ state.reviewFlipped = true; renderReview(); }
+async function answerCard(correct){
+  const progId = state.reviewQueue[state.reviewIndex];
+  const prog = state.progress.find(p=>p.id===progId);
+  state.reviewScore.total++;
+  if(correct) state.reviewScore.correct++;
+
+  const today = todayStr();
+  let update;
+  if(correct){
+    if(prog.level>=5){
+      update = {status:"mastered", level:6, next_review:null, queued_at:null};
+    } else {
+      update = {status:"queued", level:prog.level+1, queued_at:today, next_review:null};
+    }
+  } else {
+    update = {status:"active", level:1, next_review:addDaysStr(today,1), queued_at:null};
+  }
+  Object.assign(prog, update);
+  await sb.from("progress").update(update).eq("id", prog.id);
+
+  state.reviewIndex++;
+  state.reviewFlipped = false;
+  renderReview();
+}
+function addDaysStr(dateStr, n){ return toISODate(addDays(dateStr,n)); }
+
+/* ---------- ADD ---------- */
+function renderAdd(){
+  const el = document.getElementById("view-add");
+  el.innerHTML = `
+    <h2 class="view-title">Ajouter des mots</h2>
+    <div class="subtab-row">
+      <button class="subtab ${state.addSubtab==='single'?'active':''}" onclick="setAddSubtab('single')">Un mot</button>
+      <button class="subtab ${state.addSubtab==='bulk'?'active':''}" onclick="setAddSubtab('bulk')">Plusieurs (IA)</button>
+    </div>
+    <div id="add-body"></div>
+  `;
+  renderAddBody();
+}
+function setAddSubtab(tab){ state.addSubtab = tab; state.bulkGenerated = []; renderAdd(); }
+function renderAddBody(){
+  const body = document.getElementById("add-body");
+  if(state.addSubtab==="single"){
+    body.innerHTML = `
+      <div class="card">
+        <div class="field"><label>Mot en français</label><input type="text" id="s-french"></div>
+        <div class="field"><label>Traduction anglaise</label><input type="text" id="s-english"></div>
+        <div class="grid-2">
+          <div class="field"><label>Type</label>
+            <select id="s-type" onchange="renderAddBody()">
+              <option value="nom">nom</option><option value="verbe">verbe</option>
+              <option value="adjectif">adjectif</option><option value="adverbe">adverbe</option>
+              <option value="expression">expression</option>
+            </select>
+          </div>
+          <div class="field"><label>Niveau de départ</label>
+            <select id="s-level">
+              ${LEVELS.map(l=>`<option value="${l.id}">${l.label}</option>`).join("")}
+              <option value="6">Maîtrisé</option>
+            </select>
+          </div>
+        </div>
+        <div id="s-type-extra"></div>
+        <div class="field"><label>Exemple (français)</label><input type="text" id="s-example"></div>
+        <div class="field"><label>Traduction de l'exemple</label><input type="text" id="s-example-en"></div>
+        <button class="btn btn-primary btn-block" onclick="saveSingleWord()">Ajouter le mot</button>
+      </div>
+    `;
+    const typeExtra = document.getElementById("s-type-extra");
+    const type = document.getElementById("s-type").value;
+    if(type==="nom"){
+      typeExtra.innerHTML = `<div class="grid-2">
+        <div class="field"><label>Genre</label><select id="s-gender"><option value="m">masculin</option><option value="f">féminin</option></select></div>
+        <div class="field"><label>Pluriel</label><input type="text" id="s-plural"></div>
+      </div>`;
+    } else if(type==="verbe"){
+      typeExtra.innerHTML = `<div class="field"><label>Formes principales</label><input type="text" id="s-parts" placeholder="ex : parler, je parle, j'ai parlé"></div>`;
+    }
+  } else {
+    body.innerHTML = `
+      <div class="card">
+        <div class="field"><label>Mots à générer (un par ligne, français ou anglais)</label>
+          <textarea id="b-words" rows="5" placeholder="maison
+to eat
+rapide"></textarea>
+        </div>
+        <div class="field"><label>Niveau de départ</label>
+          <select id="b-level">
+            ${LEVELS.map(l=>`<option value="${l.id}">${l.label}</option>`).join("")}
+            <option value="6">Maîtrisé</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-block" id="b-gen-btn" onclick="generateBulk()">Générer avec l'IA</button>
+      </div>
+      <div id="bulk-results"></div>
+    `;
+    renderBulkResults();
+  }
+}
+async function saveSingleWord(){
+  const french = document.getElementById("s-french").value.trim();
+  const english = document.getElementById("s-english").value.trim();
+  const type = document.getElementById("s-type").value;
+  const level = parseInt(document.getElementById("s-level").value,10);
+  if(!french || !english){ toast("Ajoute au moins le mot et sa traduction."); return; }
+  const card = {
+    french, english, word_type: type,
+    gender: type==="nom" ? document.getElementById("s-gender").value : null,
+    plural: type==="nom" ? (document.getElementById("s-plural").value.trim()||null) : null,
+    principal_parts: type==="verbe" ? (document.getElementById("s-parts").value.trim()||null) : null,
+    example: document.getElementById("s-example").value.trim()||null,
+    example_translation: document.getElementById("s-example-en").value.trim()||null,
+  };
+  await insertWordsWithProgress([card], level);
+  toast("Mot ajouté !");
+  document.querySelectorAll("#add-body input").forEach(i=>i.value="");
+}
+async function insertWordsWithProgress(cards, level){
+  const uid = state.user.id;
+  const rows = cards.map(c=>({...c, user_id: uid}));
+  const {data: inserted, error} = await sb.from("user_words").insert(rows).select();
+  if(error){ toast("Erreur : "+error.message); return; }
+  const today = todayStr();
+  const progressRows = inserted.map(w=>{
+    if(level===6){
+      return {user_id: uid, word_id: w.id, status:"mastered", level:6, next_review:null, queued_at:null};
+    }
+    return {user_id: uid, word_id: w.id, status:"active", level, next_review: today, queued_at:null};
+  });
+  const {data: progInserted, error: progErr} = await sb.from("progress").insert(progressRows).select();
+  if(progErr){ toast("Erreur progression : "+progErr.message); return; }
+  state.words.push(...inserted);
+  state.progress.push(...progInserted);
+}
+async function generateBulk(){
+  const raw = document.getElementById("b-words").value.trim();
+  if(!raw){ toast("Ajoute au moins un mot."); return; }
+  if(!state.apiKey){ toast("Ajoute ta clé API Anthropic dans Réglages."); return; }
+  const btn = document.getElementById("b-gen-btn");
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Génération...`;
+  const words = raw.split("\n").map(w=>w.trim()).filter(Boolean);
+  const systemPrompt = `Tu es un assistant de vocabulaire français. Pour chaque mot ou expression donné (en français ou en anglais), retourne un objet avec : french (le mot en français avec les accents corrects), english (traduction anglaise), word_type (un parmi: nom, verbe, adjectif, adverbe, expression), gender ("m" ou "f", uniquement pour les noms, sinon null), plural (forme plurielle pour les noms, sinon null), principal_parts (pour les verbes: "infinitif, je [présent], j'ai [passé composé]", sinon null), example (une phrase française naturelle utilisant le mot), example_translation (traduction anglaise de la phrase). Réponds UNIQUEMENT avec un tableau JSON valide, sans texte autour, sans balises markdown.`;
+  const userPrompt = `Mots : ${JSON.stringify(words)}`;
+  try{
+    const text = await callClaude(systemPrompt, userPrompt);
+    const parsed = parseAIJson(text);
+    state.bulkGenerated = parsed.map(c=>({...c, _include:true}));
+    renderBulkResults();
+  } catch(e){
+    toast("Erreur IA : "+e.message);
+  }
+  btn.disabled = false; btn.textContent = "Générer avec l'IA";
+}
+function renderBulkResults(){
+  const el = document.getElementById("bulk-results");
+  if(!el) return;
+  if(state.bulkGenerated.length===0){ el.innerHTML = ""; return; }
+  el.innerHTML = `
+    ${state.bulkGenerated.map((c,i)=>`
+      <div class="gen-card">
+        <div class="gc-head">
+          <label class="checkbox-row"><input type="checkbox" ${c._include?"checked":""} onchange="toggleBulkInclude(${i})"><span class="gc-fr">${c.french}</span></label>
+          <span class="badge">${TYPE_LABELS[c.word_type]||c.word_type}</span>
+        </div>
+        <div>${c.english}</div>
+        ${c.example ? `<div style="font-size:12.5px;color:var(--ink-soft);font-style:italic;margin-top:4px;">« ${c.example} »</div>` : ""}
+      </div>
+    `).join("")}
+    <button class="btn btn-primary btn-block" onclick="saveBulkSelection()">Enregistrer la sélection</button>
+  `;
+}
+function toggleBulkInclude(i){ state.bulkGenerated[i]._include = !state.bulkGenerated[i]._include; }
+async function saveBulkSelection(){
+  const level = parseInt(document.getElementById("b-level").value,10);
+  const selected = state.bulkGenerated.filter(c=>c._include).map(({_include, ...rest})=>rest);
+  if(selected.length===0){ toast("Sélectionne au moins un mot."); return; }
+  await insertWordsWithProgress(selected, level);
+  toast(`${selected.length} mot(s) ajouté(s) !`);
+  state.bulkGenerated = [];
+  document.getElementById("b-words").value = "";
+  renderBulkResults();
+}
+
+/* ---------- LEVELS ---------- */
+function renderLevels(){
+  const el = document.getElementById("view-levels");
+  const today = todayStr();
+  const masteredCount = state.progress.filter(p=>p.status==="mastered").length;
+  el.innerHTML = `<h2 class="view-title">Niveaux</h2>` +
+    LEVELS.map(l=>{
+      const activeRows = state.progress.filter(p=>p.status==="active" && p.level===l.id);
+      const dueToday = activeRows.filter(p=>p.next_review<=today).length;
+      const queuedRows = state.progress.filter(p=>p.status==="queued" && p.level===l.id);
+      const byDate = {};
+      queuedRows.forEach(p=>{ (byDate[p.queued_at] = byDate[p.queued_at]||[]).push(p); });
+      const dates = Object.keys(byDate).sort();
+      return `
+        <div class="card level-card">
+          <div class="level-head">
+            <div><div class="lname">${l.label}</div><div class="lcadence">${l.cadence}</div></div>
+          </div>
+          <div class="level-counts"><span><b>${activeRows.length}</b> actifs (${dueToday} dus)</span><span><b>${queuedRows.length}</b> en attente</span></div>
+
+          ${dates.length>0 ? `
+            <div class="queue-group">
+              <div style="font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;">En attente de promotion</div>
+              ${dates.map(d=>`
+                <div class="queue-date-row">
+                  <label class="checkbox-row" style="flex:1;">
+                    <input type="checkbox" class="qdate-${l.id}" value="${d}">
+                    <span>${formatDate(d)} — ${byDate[d].length} mot(s)</span>
+                  </label>
+                </div>
+              `).join("")}
+              <div class="level-actions">
+                <button class="btn btn-secondary btn-sm" onclick="selectAllDates(${l.id})">Tout sélectionner</button>
+                <button class="btn btn-primary btn-sm" onclick="promoteSelected(${l.id})">Promouvoir la sélection</button>
+              </div>
+            </div>
+          ` : ""}
+
+          <details class="mini"><summary>Voir les mots actifs (${activeRows.length})</summary>
+            ${activeRows.map(p=>{
+              const w = wordById(p.word_id);
+              return `<div class="word-row"><span><span class="wf">${w.french}</span> <span class="we">${w.english}</span></span><button class="btn btn-ghost btn-sm" onclick="deleteWord('${w.id}')">🗑</button></div>`;
+            }).join("") || `<div class="we">Aucun mot.</div>`}
+          </details>
+        </div>
+      `;
+    }).join("") +
+    `<div class="card level-card">
+       <div class="level-head"><div><div class="lname">Maîtrisé</div><div class="lcadence">Plus de révision</div></div></div>
+       <div class="level-counts"><span><b>${masteredCount}</b> mots</span></div>
+       <details class="mini"><summary>Voir les mots maîtrisés (${masteredCount})</summary>
+         ${state.progress.filter(p=>p.status==="mastered").map(p=>{
+            const w = wordById(p.word_id);
+            return `<div class="word-row"><span><span class="wf">${w.french}</span> <span class="we">${w.english}</span></span><button class="btn btn-ghost btn-sm" onclick="deleteWord('${w.id}')">🗑</button></div>`;
+         }).join("") || `<div class="we">Aucun mot.</div>`}
+       </details>
+     </div>`;
+}
+function formatDate(d){
+  const dt = new Date(d+"T00:00:00");
+  return dt.toLocaleDateString("fr-FR", {day:"numeric", month:"short"});
+}
+function selectAllDates(levelId){
+  document.querySelectorAll(`.qdate-${levelId}`).forEach(cb=>cb.checked=true);
+}
+async function promoteSelected(levelId){
+  const checked = Array.from(document.querySelectorAll(`.qdate-${levelId}:checked`)).map(cb=>cb.value);
+  if(checked.length===0){ toast("Sélectionne au moins une date."); return; }
+  const ids = state.progress.filter(p=>p.status==="queued" && p.level===levelId && checked.includes(p.queued_at)).map(p=>p.id);
+  const today = todayStr();
+  const nextReview = computeNextReview(levelId, today);
+  const {error} = await sb.from("progress").update({status:"active", next_review:nextReview, queued_at:null}).in("id", ids);
+  if(error){ toast("Erreur : "+error.message); return; }
+  state.progress.forEach(p=>{ if(ids.includes(p.id)){ p.status="active"; p.next_review=nextReview; p.queued_at=null; } });
+  toast(`${ids.length} mot(s) promu(s) !`);
+  renderLevels();
+}
+async function deleteWord(wordId){
+  if(!confirm("Supprimer ce mot définitivement ?")) return;
+  const {error} = await sb.from("user_words").delete().eq("id", wordId);
+  if(error){ toast("Erreur : "+error.message); return; }
+  state.words = state.words.filter(w=>w.id!==wordId);
+  state.progress = state.progress.filter(p=>p.word_id!==wordId);
+  toast("Mot supprimé.");
+  renderLevels();
+}
+
+/* ---------- FAMILY / CONJUGATION LOOKUP ---------- */
+function renderFamily(){
+  const el = document.getElementById("view-family");
+  el.innerHTML = `
+    <h2 class="view-title">Familles de mots</h2>
+    <div class="card">
+      <div class="field"><label>Mot à rechercher</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="fam-input" style="flex:1;" placeholder="ex : parler, rapide, la maison">
+          <button class="btn btn-primary" id="fam-btn" onclick="lookupFamily()">Rechercher</button>
+        </div>
+      </div>
+    </div>
+    <div id="fam-results"></div>
+  `;
+  renderFamilyResults();
+}
+async function lookupFamily(){
+  const word = document.getElementById("fam-input").value.trim();
+  if(!word){ return; }
+  if(!state.apiKey){ toast("Ajoute ta clé API Anthropic dans Réglages."); return; }
+  const btn = document.getElementById("fam-btn");
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span>`;
+  const systemPrompt = `Tu es un dictionnaire français expert. Pour le mot donné, retourne un objet JSON avec : word (le mot en français, forme canonique), word_type (nom, verbe, adjectif, adverbe, ou expression), meaning (traduction anglaise courte), conjugation (si c'est un verbe : objet avec present, passe_compose, imparfait, futur — chacun un tableau de 6 formes conjuguées "je ... / tu ... / il-elle ... / nous ... / vous ... / ils-elles ..."; sinon null), family (tableau d'objets {word, type, meaning} de mots de la même famille : formes dérivées, nom/verbe/adjectif/adverbe apparentés — 3 à 6 éléments), expressions (tableau d'objets {fr, en} d'expressions ou locutions courantes utilisant ce mot — 2 à 4 éléments). Réponds UNIQUEMENT avec l'objet JSON, sans texte autour, sans markdown.`;
+  try{
+    const text = await callClaude(systemPrompt, `Mot : ${word}`);
+    state.familyResult = parseAIJson(text);
+    state.familyTab = state.familyResult.conjugation ? "conjugation" : "family";
+    renderFamilyResults();
+  } catch(e){
+    toast("Erreur IA : "+e.message);
+  }
+  btn.disabled = false; btn.textContent = "Rechercher";
+}
+function setFamilyTab(t){ state.familyTab = t; renderFamilyResults(); }
+function renderFamilyResults(){
+  const el = document.getElementById("fam-results");
+  if(!el) return;
+  const r = state.familyResult;
+  if(!r){ el.innerHTML = ""; return; }
+  const tabs = [];
+  if(r.conjugation) tabs.push(["conjugation","Conjugaison"]);
+  tabs.push(["family","Famille"]);
+  tabs.push(["expressions","Expressions"]);
+
+  let body = "";
+  if(state.familyTab==="conjugation" && r.conjugation){
+    const persons = ["je","tu","il/elle","nous","vous","ils/elles"];
+    body = Object.entries(r.conjugation).map(([tense, forms])=>`
+      <div style="margin-bottom:14px;">
+        <div style="font-weight:600;font-size:13px;text-transform:capitalize;margin-bottom:6px;">${tense.replace("_"," ")}</div>
+        <table class="conj-table">${forms.map((f,i)=>`<tr><td>${persons[i]||""}</td><td>${f}</td></tr>`).join("")}</table>
+      </div>
+    `).join("");
+  } else if(state.familyTab==="family"){
+    body = (r.family||[]).map(f=>`
+      <div class="fam-item">
+        <div><div class="fi-word">${f.word}</div><div class="fi-meta">${TYPE_LABELS[f.type]||f.type} · ${f.meaning}</div></div>
+        <button class="btn btn-secondary btn-sm" onclick='quickAddFamily(${JSON.stringify(f).replace(/'/g,"&apos;")})'>+ Niveau 1</button>
+      </div>
+    `).join("") || `<div class="we">Rien à afficher.</div>`;
+  } else if(state.familyTab==="expressions"){
+    body = (r.expressions||[]).map(e=>`
+      <div class="fam-item">
+        <div><div class="fi-word">${e.fr}</div><div class="fi-meta">${e.en}</div></div>
+        <button class="btn btn-secondary btn-sm" onclick='quickAddExpr(${JSON.stringify(e).replace(/'/g,"&apos;")})'>+ Niveau 1</button>
+      </div>
+    `).join("") || `<div class="we">Rien à afficher.</div>`;
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <div style="font-family:var(--font-display);font-size:22px;">${r.word}</div>
+      <div class="we">${TYPE_LABELS[r.word_type]||r.word_type} · ${r.meaning}</div>
+      <div class="family-tabs">${tabs.map(([id,label])=>`<button class="family-tab ${state.familyTab===id?'active':''}" onclick="setFamilyTab('${id}')">${label}</button>`).join("")}</div>
+      ${body}
+    </div>
+  `;
+}
+async function quickAddFamily(f){
+  await insertWordsWithProgress([{french:f.word, english:f.meaning, word_type:f.type, gender:null, plural:null, principal_parts:null, example:null, example_translation:null}], 1);
+  toast("Ajouté au niveau 1 !");
+}
+async function quickAddExpr(e){
+  await insertWordsWithProgress([{french:e.fr, english:e.en, word_type:"expression", gender:null, plural:null, principal_parts:null, example:null, example_translation:null}], 1);
+  toast("Ajouté au niveau 1 !");
+}
+
+/* ---------- SETTINGS ---------- */
+function renderSettings(){
+  const el = document.getElementById("view-settings");
+  el.innerHTML = `
+    <h2 class="view-title">Réglages</h2>
+    <div class="card">
+      <div class="field"><label>Utilisateur</label><input type="text" value="${state.user.username}" disabled></div>
+      <div class="field"><label>Clé API Anthropic</label><input type="password" id="api-key-input" value="${state.apiKey||''}" placeholder="sk-ant-..."></div>
+      <button class="btn btn-primary btn-block" onclick="saveApiKey()">Enregistrer la clé</button>
+    </div>
+    <button class="btn btn-secondary btn-block" onclick="doLogout()">Se déconnecter</button>
+  `;
+}
+async function saveApiKey(){
+  const key = document.getElementById("api-key-input").value.trim();
+  const {error} = await sb.from("users").update({api_key: key}).eq("id", state.user.id);
+  if(error){ toast("Erreur : "+error.message); return; }
+  state.apiKey = key;
+  toast("Clé enregistrée.");
+}
+
+/* ---------- AI helper ---------- */
+async function callClaude(systemPrompt, userPrompt){
+  const res = await fetch(WORKER_PROXY_URL, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization":"Bearer "+state.apiKey},
+    body: JSON.stringify({
+      model: AI_MODEL,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{role:"user", content: userPrompt}],
+    }),
+  });
+  if(!res.ok){ throw new Error("statut "+res.status); }
+  const data = await res.json();
+  const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
+  if(!text) throw new Error("réponse vide");
+  return text;
+}
+function parseAIJson(text){
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^```json/i,"").replace(/^```/,"").replace(/```$/,"").trim();
+  return JSON.parse(cleaned);
+}
+
+/* ---------- init ---------- */
+tryAutoLogin();
+</script>
+</body>
+</html>
