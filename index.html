@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="Mufradaati"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=Philosopher:wght@400;700&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=Philosopher:wght@400;700&family=Mirza:wght@400;700&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#04140F;color:#EEE8D5;font-family:'Philosopher','Amiri',Georgia,serif;min-height:100vh;overflow-x:hidden;}
@@ -1082,7 +1082,7 @@ function R(){
   app.innerHTML=`<div class="shell">
     <nav>
       <div style="display:flex;align-items:center;gap:10px;cursor:pointer" onclick="V('home')">
-        <span style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:24px;color:#D9B45E">مفرداتي</span>
+        <span style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:24px;color:#D9B45E">مفرداتي</span>
         <span style="font-size:10px;color:#8DB5A5;letter-spacing:.15em;text-transform:uppercase">Mufradaati</span>
       </div>
       <div style="display:flex;gap:3px;align-items:center">
@@ -1111,7 +1111,7 @@ function renderAuth(){
   return`<div class="auth-wrap">
     <div class="auth-box">
       <div style="text-align:center;margin-bottom:28px">
-        <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:46px;color:#D9B45E;line-height:1">مفرداتي</div>
+        <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:46px;color:#D9B45E;line-height:1">مفرداتي</div>
         <div style="font-size:11px;color:#8DB5A5;letter-spacing:.2em;text-transform:uppercase;margin-top:6px">Mufradaati</div>
       </div>
       <div style="display:flex;gap:4px;background:rgba(255,255,255,.04);border-radius:10px;padding:4px;margin-bottom:24px">
@@ -1412,7 +1412,7 @@ function sessionWaitingBox(){
 function rASingle(){
   const defaultLevel=sessionWaitingBox()||"V";
   const levelOpts=LV.map(l=>`<option value="${l.id}"${l.id===defaultLevel?" selected":""}>${l.l} — ${l.s}</option>`).join("");
-  return`<div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:18px">إضافة كلمة</div>
+  return`<div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:18px">إضافة كلمة</div>
   <div style="background:#0A2A21;border:1px solid rgba(217,180,94,0.18);border-radius:16px;padding:24px">
     <div style="margin-bottom:16px"><label class="lbl">Arabic Script *</label>
       <input id="fa" class="inp" style="font-family:'Amiri',serif;font-size:24px;direction:rtl;text-align:right" placeholder="اكتب الكلمة هنا"/>
@@ -1438,7 +1438,7 @@ function rABulk(){
   // Show the review screen only for cards this tab generated — cards pending
   // from the AI Import tab stay over there.
   if(bulkCards.length>0 && bulkSource==="add") return rABulkReview();
-  return`<div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">إضافة بالجملة</div>
+  return`<div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">إضافة بالجملة</div>
   <div style="font-size:12px;color:#8DB5A5;margin-bottom:16px;line-height:1.6">Type one word per line — Arabic or English. Claude generates the cards with diacritics, plurals, and verb forms. Example sentences are written later, when a word leaves the Vault for review.</div>
 
   ${!hasKey?`<div style="padding:10px 14px;background:rgba(240,122,122,0.08);border:1px solid rgba(240,122,122,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;color:#F07A7A">
@@ -1735,7 +1735,7 @@ function rRS(){
   }).join("");
   return`<div style="text-align:left;margin-bottom:14px">
     <button onclick="V('home')" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:13px;padding:0">← Back</button></div>
-  <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:38px;color:#D9B45E;text-align:center;margin-bottom:6px">مراجعة</div>
+  <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:38px;color:#D9B45E;text-align:center;margin-bottom:6px">مراجعة</div>
   <div style="color:#8DB5A5;font-size:13px;text-align:center;margin-bottom:18px">${DN[new Date().getDay()]} — steps run ${RO.filter(id=>el.has(id)).map(id=>lvi(id).l).join(" → ")}</div>
   ${sh("Select Levels")}${togs}
   <div style="height:14px"></div>
@@ -1776,12 +1776,12 @@ function rRS(){
   ${sh("Direction")}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
     <div onclick="startSession('en-ar')" style="background:#0A2A21;border:1px solid #D9B45E;border-radius:12px;padding:18px 14px;cursor:pointer;text-align:center">
-      <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:22px;color:#D9B45E;margin-bottom:5px">A → ع</div>
+      <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:22px;color:#D9B45E;margin-bottom:5px">A → ع</div>
       <div style="font-size:13px;font-weight:600;color:#EEE8D5">English → Arabic</div>
       <div style="font-size:9px;color:#D9B45E;margin-top:5px;letter-spacing:.06em;text-transform:uppercase">★ Recommended</div>
     </div>
     <div onclick="startSession('ar-en')" style="background:#0A2A21;border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:18px 14px;cursor:pointer;text-align:center">
-      <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:22px;color:#D9B45E;margin-bottom:5px">ع → A</div>
+      <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);font-size:22px;color:#D9B45E;margin-bottom:5px">ع → A</div>
       <div style="font-size:13px;font-weight:600;color:#EEE8D5">Arabic → English</div>
     </div>
   </div>`;
@@ -1963,7 +1963,7 @@ function rD(){
     ? `<div style="padding:12px 14px;background:rgba(240,122,122,0.10);border:1px solid rgba(240,122,122,0.45);border-radius:10px;margin-bottom:14px;font-size:12px;color:#F07A7A">⚠ Sync FAILED — your reviews are stored locally but NOT in the cloud. Do not close this tab or refresh. Tap the sync dot ↑ for details.<br><br><strong>Error:</strong> ${lastSyncError}<br><br><button onclick="saveProgressToDB()" style="margin-top:6px;background:rgba(240,122,122,0.2);border:1px solid #F07A7A;color:#F07A7A;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">Retry Sync</button></div>`
     : `<div style="padding:10px 14px;background:rgba(95,211,160,0.08);border:1px solid rgba(95,211,160,0.2);border-radius:10px;margin-bottom:14px;font-size:12px;color:#5FD3A0">Progress saved to cloud ✓ — safe to close</div>`;
   return`<div style="text-align:center">
-    <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:50px;color:#D9B45E;margin-bottom:8px">${msg}</div>
+    <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:50px;color:#D9B45E;margin-bottom:8px">${msg}</div>
     <div style="color:#8DB5A5;font-size:13px;margin-bottom:18px">${rr.length} card${rr.length!==1?"s":""} reviewed</div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px">
       <div style="background:#0A2A21;border:1px solid rgba(217,180,94,0.18);border-radius:10px;padding:14px 8px"><div style="font-size:28px;font-weight:700;color:#F07A7A">${ag}</div><div style="font-size:10px;color:#8DB5A5;margin-top:3px;text-transform:uppercase;letter-spacing:.08em">Again</div></div>
@@ -2129,7 +2129,7 @@ function rBonusDone(){
   const pct=bRr.length?Math.round((right/bRr.length)*100):0;
   const msg=pct>=90?"ممتاز!":pct>=70?"أحسنت!":pct>=50?"استمر!":"تدرب أكثر";
   return`<div style="text-align:center">
-    <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(95,211,160,.45);direction:rtl;font-size:46px;color:#5FD3A0;margin-bottom:8px">${msg}</div>
+    <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(95,211,160,.45);direction:rtl;font-size:46px;color:#5FD3A0;margin-bottom:8px">${msg}</div>
     <div style="color:#8DB5A5;font-size:13px;margin-bottom:18px">${bRr.length} mastered word${bRr.length!==1?"s":""} drilled</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:18px">
       <div style="background:#0A2A21;border:1px solid rgba(95,211,160,0.2);border-radius:10px;padding:14px 8px">
@@ -2266,7 +2266,7 @@ function rI(){
   // Extraction results go through the same editor as bulk add — expand to edit,
   // × to drop a word, and a level selector that defaults to L1 Queue.
   if(bulkCards.length&&bulkSource==="import"){
-    return`<div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">استيراد ذكي</div>
+    return`<div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">استيراد ذكي</div>
     <div style="font-size:12px;color:#8DB5A5;margin-bottom:16px;line-height:1.6">Review what was found — drop anything you don't want before adding.</div>
     ${rABulkReview()}`;
   }
@@ -2283,7 +2283,7 @@ function rI(){
     ? `✦ Extract from ${importImages.length} Image${importImages.length!==1?"s":""}`
     : "✦ Extract Vocabulary with AI";
 
-  return`<div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">استيراد ذكي</div>
+  return`<div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">استيراد ذكي</div>
   <div style="font-size:12px;color:#8DB5A5;margin-bottom:16px;line-height:1.6">Upload a screenshot or paste Arabic text — AI reads it and extracts the vocabulary.</div>
   ${!hasKey?`<div style="padding:10px 14px;background:rgba(240,122,122,0.08);border:1px solid rgba(240,122,122,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;color:#F07A7A">
     No API key saved. <span style="cursor:pointer;text-decoration:underline" onclick="V('settings')">Add it in Settings →</span>
@@ -2346,7 +2346,7 @@ let rootTab='verbs'; // 'verbs'|'nouns'|'expressions'
 function rRoot(){
   const hasKey=!!(gLS(`mufradat-apikey-${CU.username}`));
   const searchBox=`
-    <div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">بَحْثٌ فِي الْجُذُورِ</div>
+    <div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">بَحْثٌ فِي الْجُذُورِ</div>
     <div style="font-size:12px;color:#8DB5A5;margin-bottom:18px;line-height:1.6">Enter a 3-letter Arabic root in Arabic script or English transliteration.</div>
     ${!hasKey?`<div style="padding:10px 14px;background:rgba(240,122,122,0.08);border:1px solid rgba(240,122,122,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;color:#F07A7A">No API key. <span style="cursor:pointer;text-decoration:underline" onclick="V('settings')">Add it in Settings →</span></div>`:''}
     <div style="background:#0A2A21;border:1px solid rgba(217,180,94,0.22);border-radius:14px;padding:20px;margin-bottom:16px">
@@ -2689,7 +2689,7 @@ function rApply(){
       <button class="btn2" style="width:100%;text-align:center" onclick="applyResult=null;R()">← Generate Another</button>
     </div>`:"";
 
-  return`<div style="font-family:'Aref Ruqaa',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">مُطَبَّقٌ</div>
+  return`<div style="font-family:'Mirza',serif;text-shadow:0 0 14px rgba(240,212,138,.45);direction:rtl;font-size:26px;color:#D9B45E;text-align:right;margin-bottom:6px">مُطَبَّقٌ</div>
   <div style="font-size:12px;color:#8DB5A5;margin-bottom:18px">Practice your Arabic in context.</div>
   ${modeCards}
   ${dialectSelect}
