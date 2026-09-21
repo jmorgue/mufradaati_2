@@ -319,9 +319,9 @@ async function promoteFromVault(ids,target){
   const list=(ids||[]).filter(id=>prog[id]||bw().some(w=>w.id===id));
   if(!list.length){toast("Nothing selected","#C49E3C");return;}
   const now=Date.now();
-  list.forEach(id=>{
+  list.forEach((id,i)=>{
     const cur=prog[id]||{};
-    prog[id]={...cur,leitnerLevel:target,nextReview:nrf(target)||now,queuedAt:now};
+    prog[id]={...cur,leitnerLevel:target,nextReview:nrf(target)||now,queuedAt:now+i};
   });
   saveProgLocal();
   vaultSelected.clear();vaultSelectMode=false;
@@ -347,9 +347,9 @@ async function promoteFromVault(ids,target){
 async function moveWordsFromVaultToL1(ids){
   const now=Date.now();
   vaultUndo={ids:ids.slice()};
-  ids.forEach(id=>{
+  ids.forEach((id,i)=>{
     const cur=prog[id]||{};
-    prog[id]={...cur,leitnerLevel:"L1",nextReview:now,queuedAt:now};
+    prog[id]={...cur,leitnerLevel:"L1",nextReview:now,queuedAt:now+i};
   });
   saveProgLocal();
   const moved=ids.map(id=>uw.find(w=>w.id===id)).filter(Boolean);
@@ -1024,11 +1024,17 @@ async function deleteWordCompletely(id){
 
 // Words
 function bw(){
-  const s=SU.map(w=>{const id=sid(w.arabic);const p=prog[id]||{};return{...w,id,createdAt:0,leitnerLevel:p.leitnerLevel||"L1",nextReview:p.nextReview||Date.now()};});
+  const s=SU.map(w=>{const id=sid(w.arabic);const p=prog[id]||{};return{...w,id,createdAt:0,leitnerLevel:p.leitnerLevel||"L1",nextReview:p.nextReview||Date.now(),queuedAt:p.queuedAt||null};});
   const sa=new Set(s.map(w=>w.arabic));
-  const u=uw.filter(w=>!sa.has(w.arabic)).map(w=>{const p=prog[w.id]||{};return{...w,leitnerLevel:mig(p.leitnerLevel||w.leitnerLevel||"L1"),nextReview:p.nextReview||w.nextReview||Date.now()};});
+  const u=uw.filter(w=>!sa.has(w.arabic)).map(w=>{const p=prog[w.id]||{};return{...w,leitnerLevel:mig(p.leitnerLevel||w.leitnerLevel||"L1"),nextReview:p.nextReview||w.nextReview||Date.now(),queuedAt:p.queuedAt||null};});
   return[...s,...u];
 }
+// Box order: a box is an ordered list, oldest entry first. A word's position
+// is when it entered its current box (queuedAt); words from before that was
+// tracked fall back to createdAt. Moving a word stamps a new queuedAt, which
+// appends it to the end of the destination box.
+function ordKey(w){return w.queuedAt||w.createdAt||0;}
+function byOrder(a,b){return ordKey(a)-ordKey(b)||(a.createdAt||0)-(b.createdAt||0);}
 // Midnight rule: once per calendar day, the first time the app opens that day,
 // release ALL of L1Q into L1. This is the only box that moves on a timer —
 // L2A/L3Q/L4Q/L5A only move when their destination box's step actually runs
@@ -1040,8 +1046,9 @@ function cam(){
   try{if(localStorage.getItem(lastKey)===todayKey)return;}catch(e){}
   const words=bw();
   let count=0;
-  words.filter(w=>w.leitnerLevel==="L1Q").forEach(w=>{
-    prog[w.id]={...(prog[w.id]||{}),leitnerLevel:"L1",nextReview:Date.now()};
+  const stamp=Date.now();
+  words.filter(w=>w.leitnerLevel==="L1Q").sort(byOrder).forEach((w,i)=>{
+    prog[w.id]={...(prog[w.id]||{}),leitnerLevel:"L1",nextReview:stamp,queuedAt:stamp+i};
     count++;
   });
   try{localStorage.setItem(lastKey,todayKey);}catch(e){}
@@ -1333,7 +1340,7 @@ function rVault(tabs){
 }
 
 function rL(){
-  const words=bw(),lv=lvi(al),lw=words.filter(w=>w.leitnerLevel===al).sort((a,b)=>a.createdAt-b.createdAt);
+  const words=bw(),lv=lvi(al),lw=words.filter(w=>w.leitnerLevel===al).sort(byOrder);
   const tabs=LV.map(l=>`<button class="tb" onclick="GL('${l.id}')" style="${al===l.id?`background:rgba(${rgb(l.c)},0.15);border-color:${l.c};color:${l.c}`:""}">${l.l}</button>`).join("");
   if(al==="V")return rVault(tabs);
   const li=LV.findIndex(l=>l.id===al);
@@ -1352,6 +1359,7 @@ function rL(){
         ${qBadge}
       </div>
       <div style="display:flex;gap:1px;flex-shrink:0">
+        <select onchange="MWto('${w.id}',this.value)" title="Move to any box" style="background:#0C1B30;border:1px solid rgba(196,158,60,0.25);border-radius:6px;color:#667788;font-family:inherit;font-size:11px;padding:2px 3px;max-width:74px;cursor:pointer"><option value="">Move…</option>${LV.filter(l=>l.id!==al).map(l=>`<option value="${l.id}">${l.l}</option>`).join("")}</select>
         ${li>0?`<button onclick="MW('${w.id}',-1)" style="background:none;border:none;cursor:pointer;color:#667788;font-size:14px;padding:3px 5px">↓</button>`:""}
         ${li<LV.length-1?`<button onclick="MW('${w.id}',1)" style="background:none;border:none;cursor:pointer;color:#667788;font-size:14px;padding:3px 5px">↑</button>`:""}
         ${w.id.startsWith("seed-")?"":` <button onclick="DW('${w.id}')" style="background:none;border:none;cursor:pointer;color:rgba(192,72,72,.45);font-size:16px;padding:3px 5px">×</button>`}
@@ -1379,6 +1387,8 @@ function rL(){
   ${rows}`;
 }
 function MW(id,d){const words=bw();const w=words.find(x=>x.id===id);if(!w)return;const ci=LV.findIndex(l=>l.id===w.leitnerLevel);const ni=Math.min(Math.max(ci+d,0),LV.length-1);const nl=LV[ni].id;prog[id]={leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now()};scheduleSync();R();}
+// Move a word by hand straight to any box; it lands at the end of that box.
+function MWto(id,nl){if(!nl||!VI.has(nl))return;prog[id]={...(prog[id]||{}),leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now()};scheduleSync();R();}
 async function DW(id){await deleteWordCompletely(id);R();}
 
 // ── ADD ──
@@ -1573,7 +1583,7 @@ function rABulkReview(){
   <div style="margin-bottom:12px;margin-top:14px">
     <label class="lbl">Add all cards to</label>
     <select id="bulk-target-level" class="inp" style="cursor:pointer;font-size:13px;padding:10px 12px">
-      ${LV.map(l=>`<option value="${l.id}"${l.id==="V"?" selected":""}>${l.l} — ${l.s}</option>`).join("")}
+      ${LV.map(l=>`<option value="${l.id}"${l.id===(sessionWaitingBox()||"V")?" selected":""}>${l.l} — ${l.s}</option>`).join("")}
     </select>
   </div>
   <div style="display:flex;gap:10px;margin-top:4px">
@@ -1811,15 +1821,15 @@ function setupStep(){
     const{picked}=buildSession(pool,budget,prioritizeTypes());
     pool=picked;
   }
-  rq=pool.slice().sort(()=>Math.random()-.5);
+  rq=pool.slice().sort(byOrder); // oldest-waiting first
   ri=0;fl=false;
   if(!rq.length)return finishStep(); // nothing at this level — step trivially done
   V("review");
 }
 function releaseAll(from,to){
   const now=Date.now();
-  bw().filter(w=>w.leitnerLevel===from).forEach(w=>{
-    prog[w.id]={...(prog[w.id]||{}),leitnerLevel:to,nextReview:now};
+  bw().filter(w=>w.leitnerLevel===from).sort(byOrder).forEach((w,i)=>{
+    prog[w.id]={...(prog[w.id]||{}),leitnerLevel:to,nextReview:now,queuedAt:now+i};
   });
 }
 async function finishStep(){
@@ -2447,6 +2457,7 @@ function renderAddButtons(arabic, english, example, wordType){
 }
 
 function addRootWord(arabic, english, example, wordType, level){
+  if(level==="L1Q"&&sessionWaitingBox())level=sessionWaitingBox(); // live session: waiting box for the current step
   const arNorm=normArabic(arabic);
   const existing=bw().find(w=>normArabic(w.arabic)===arNorm);
   if(existing){toast('Already in '+lvi(existing.leitnerLevel).l,'#C49E3C');return;}
@@ -2752,6 +2763,7 @@ function showWordPopup(word, e){
 }
 
 async function addWordFromApply(word, level){
+  if(level==="L1Q"&&sessionWaitingBox())level=sessionWaitingBox(); // live session: waiting box for the current step
   const apiKey=(gLS(`mufradat-apikey-${CU.username}`)||'').replace(/^["']|["']$/g,'');
   const lv=LV.find(l=>l.id===level);
   toast('Generating card for "'+word+'"…','#C49E3C');
