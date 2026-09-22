@@ -1042,25 +1042,10 @@ function bw(){
 // appends it to the end of the destination box.
 function ordKey(w){return w.queuedAt||w.createdAt||0;}
 function byOrder(a,b){return ordKey(a)-ordKey(b)||(a.createdAt||0)-(b.createdAt||0);}
-// Midnight rule: once per calendar day, the first time the app opens that day,
-// release ALL of L1Q into L1. This is the only box that moves on a timer —
-// L2A/L3Q/L4Q/L5A only move when their destination box's step actually runs
-// (handled inside the review engine below). Skipped while a session is live.
-function cam(){
-  if(!CU||sessionActive)return;
-  const todayKey=new Date().toDateString();
-  const lastKey=`mufradat-last-midnight-release-${CU.username}`;
-  try{if(localStorage.getItem(lastKey)===todayKey)return;}catch(e){}
-  const words=bw();
-  let count=0;
-  const stamp=Date.now();
-  words.filter(w=>w.leitnerLevel==="L1Q").sort(byOrder).forEach((w,i)=>{
-    prog[w.id]={...(prog[w.id]||{}),leitnerLevel:"L1",nextReview:stamp,queuedAt:stamp+i};
-    count++;
-  });
-  try{localStorage.setItem(lastKey,todayKey);}catch(e){}
-  if(count)saveProgressToDB();
-}
+// No box moves on a timer any more. L1Q/L3Q/L4Q/L2A/L5A only move when you
+// release them yourself — automatically at a step's end (removed) and at
+// midnight (removed) both used to move words without you choosing to.
+function cam(){/* time-based release removed by request; kept as a no-op so old call sites are harmless */}
 // Which study boxes run today, per the fixed Daily Plan. Order is always
 // high-to-low (RO); this only decides membership, not sequence.
 function todaysPlan(){
@@ -1390,8 +1375,10 @@ function rL(){
   const releaseNote=isQueue?`<div style="font-size:11px;color:#8DB5A5;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px">${
     al==="L2A"||al==="L5A"
       ? `Released into ${lvi(queueTargets[al]).l} only if you say yes, right after your next ${lvi(queueTargets[al]).l} session.`
-      : `Releases automatically into ${lvi(queueTargets[al]).l} right after your next ${lvi(queueTargets[al]).l} session${al==="L1Q"?" (or at the start of a new day)":""}.`
+      : `Nothing moves automatically. Release these into ${lvi(queueTargets[al]).l} yourself, whenever you're ready.`
   }</div>`:"";
+  // L1Q/L3Q/L4Q have no automatic or in-session release any more — only this manual button moves them.
+  const canManualRelease=isQueue&&al!=="L2A"&&al!=="L5A";
 
   return`<div class="ts">${tabs}</div>
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
@@ -1399,10 +1386,25 @@ function rL(){
       <div style="font-size:17px;font-weight:600;color:${lv.c}">${lv.l} — ${lv.s}</div>
       <div style="font-size:11px;color:#8DB5A5;margin-top:3px">${lw.length} word${lw.length!==1?"s":""}</div>
     </div>
-    ${lw.length?`<button onclick="demoteAllToVault('${al}')" title="Send every word in this box back to the Vault" style="background:none;border:1px solid rgba(141,181,165,0.35);border-radius:8px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">🗄 Send all to Vault</button>`:""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${lw.length&&canManualRelease?`<button onclick="manualRelease('${al}')" title="Send every word in this box to ${lvi(queueTargets[al]).l}" style="background:none;border:1px solid rgba(217,180,94,0.4);border-radius:8px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">↑ Release to ${lvi(queueTargets[al]).l}</button>`:""}
+      ${lw.length?`<button onclick="demoteAllToVault('${al}')" title="Send every word in this box back to the Vault" style="background:none;border:1px solid rgba(141,181,165,0.35);border-radius:8px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">🗄 Send all to Vault</button>`:""}
+    </div>
   </div>
   ${releaseNote}
   ${rows}`;
+}
+// Manual release for L1Q/L3Q/L4Q: nothing moves them any more except this.
+async function manualRelease(boxId){
+  const target={"L1Q":"L1","L3Q":"L3","L4Q":"L4"}[boxId];
+  if(!target)return;
+  const ids=bw().filter(w=>w.leitnerLevel===boxId).map(w=>w.id);
+  if(!ids.length)return;
+  if(!confirm(`Move all ${ids.length} word(s) from ${lvi(boxId).l} into ${lvi(target).l}?`))return;
+  releaseAll(boxId,target);
+  await saveProgressToDB();
+  toast(`${ids.length} word${ids.length!==1?"s":""} → ${lvi(target).l} ✓`);
+  R();
 }
 // Demote every word currently in a box back to the Vault, by hand, on request.
 async function demoteAllToVault(boxId){
@@ -1864,13 +1866,12 @@ function releaseAll(from,to){
 async function finishStep(){
   const level=sessionSteps[stepIdx];
   if(level==="L1"){
-    // Always last: L1Q clears automatically, then the session ends.
-    releaseAll("L1Q","L1");
+    // Always last. L1Q no longer clears itself — release it by hand from the
+    // Levels tab whenever you're ready (Move… dropdown or "Release to Level 1").
     await saveProgressToDB();
     return endSession();
   }
-  if(level==="L3")releaseAll("L3Q","L3");
-  if(level==="L4")releaseAll("L4Q","L4");
+  // L3Q and L4Q no longer clear themselves either — same manual release.
   if(level==="L2B"){
     const waiting=bw().filter(w=>w.leitnerLevel==="L2A");
     if(waiting.length){
