@@ -1375,6 +1375,7 @@ function rL(){
         ${qBadge}
       </div>
       <div style="display:flex;gap:1px;flex-shrink:0">
+        <button onclick="MWto('${w.id}','V')" title="Send to Vault" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">🗄</button>
         <select onchange="MWto('${w.id}',this.value)" title="Move to any box" style="background:var(--panel);border:1px solid rgba(217,180,94,0.25);border-radius:6px;color:#8DB5A5;font-family:inherit;font-size:11px;padding:2px 3px;max-width:74px;cursor:pointer"><option value="">Move…</option>${LV.filter(l=>l.id!==al).map(l=>`<option value="${l.id}">${l.l}</option>`).join("")}</select>
         ${li>0?`<button onclick="MW('${w.id}',-1)" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">↓</button>`:""}
         ${li<LV.length-1?`<button onclick="MW('${w.id}',1)" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">↑</button>`:""}
@@ -1398,9 +1399,21 @@ function rL(){
       <div style="font-size:17px;font-weight:600;color:${lv.c}">${lv.l} — ${lv.s}</div>
       <div style="font-size:11px;color:#8DB5A5;margin-top:3px">${lw.length} word${lw.length!==1?"s":""}</div>
     </div>
+    ${lw.length?`<button onclick="demoteAllToVault('${al}')" title="Send every word in this box back to the Vault" style="background:none;border:1px solid rgba(141,181,165,0.35);border-radius:8px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">🗄 Send all to Vault</button>`:""}
   </div>
   ${releaseNote}
   ${rows}`;
+}
+// Demote every word currently in a box back to the Vault, by hand, on request.
+async function demoteAllToVault(boxId){
+  const ids=bw().filter(w=>w.leitnerLevel===boxId).map(w=>w.id);
+  if(!ids.length)return;
+  if(!confirm(`Send all ${ids.length} word(s) in ${lvi(boxId).l} back to the Vault?`))return;
+  const now=Date.now();
+  ids.forEach((id,i)=>{prog[id]={...(prog[id]||{}),leitnerLevel:"V",nextReview:now,queuedAt:now+i};});
+  await saveProgressToDB();
+  toast(`${ids.length} word${ids.length!==1?"s":""} sent to the Vault ✓`);
+  R();
 }
 function MW(id,d){const words=bw();const w=words.find(x=>x.id===id);if(!w)return;const ci=LV.findIndex(l=>l.id===w.leitnerLevel);const ni=Math.min(Math.max(ci+d,0),LV.length-1);const nl=LV[ni].id;prog[id]={leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now()};scheduleSync();R();}
 // Move a word by hand straight to any box; it lands at the end of that box.
