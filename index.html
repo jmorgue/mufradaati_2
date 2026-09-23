@@ -1381,11 +1381,13 @@ function rL(){
   // live session). This is just a note explaining that.
   const releaseNote=isQueue?`<div style="font-size:11px;color:#8DB5A5;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px">${
     al==="L2A"||al==="L5A"
-      ? `Released into ${lvi(queueTargets[al]).l} only if you say yes, right after your next ${lvi(queueTargets[al]).l} session.`
+      ? `Also offered as a Yes/Skip prompt right after your next ${lvi(queueTargets[al]).l} session — or release it yourself any time with the button above.`
       : `Nothing moves automatically. Release these into ${lvi(queueTargets[al]).l} yourself, whenever you're ready.`
   }</div>`:"";
-  // L1Q/L3Q/L4Q have no automatic or in-session release any more — only this manual button moves them.
-  const canManualRelease=isQueue&&al!=="L2A"&&al!=="L5A";
+  // Every queue box (L1Q/L2A/L3Q/L4Q/L5A) gets a manual release button here,
+  // on its own list — never on the home screen. L2A/L5A also keep their
+  // in-session Yes/Skip prompt; this is just a way to do it without a session.
+  const canManualRelease=isQueue;
 
   const selectedCount=lvlSelected.size;
   return`<div class="ts">${tabs}</div>
@@ -1426,7 +1428,7 @@ async function moveIdsToBox(ids,target){
   return ordered.length;
 }
 async function manualRelease(boxId){
-  const target={"L1Q":"L1","L3Q":"L3","L4Q":"L4"}[boxId];
+  const target={"L1Q":"L1","L2A":"L2B","L3Q":"L3","L4Q":"L4","L5A":"L5B"}[boxId];
   if(!target)return;
   const ids=bw().filter(w=>w.leitnerLevel===boxId).map(w=>w.id);
   if(!ids.length)return;
