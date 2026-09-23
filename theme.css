@@ -171,11 +171,13 @@ button[style*="border:1px solid"]:not(.btn1):not(.nb):not(.rb){box-shadow:inset 
 @keyframes flare{0%{filter:drop-shadow(0 0 8px rgba(255,214,120,.8));transform:scale(1);}35%{filter:drop-shadow(0 0 30px rgba(255,236,170,1)) brightness(1.55);transform:scale(1.14);}100%{filter:drop-shadow(0 0 8px rgba(255,214,120,.8));transform:scale(1);}}
 .fx-good .pend{animation:lift .74s ease-in forwards!important;}
 @keyframes lift{0%{transform:translateY(0);opacity:1;filter:brightness(1);}35%{filter:brightness(1.35);}100%{transform:translateY(-28px);opacity:0;}}
-.fx-bad .m-lan{animation:dimflick .66s ease-out!important;}
-@keyframes dimflick{0%{opacity:1;}15%{opacity:.25;}30%{opacity:.7;}45%{opacity:.2;}100%{opacity:.6;}}
+/* Wrong: the mirror of "flare" — lanterns fade down smoothly (no flicker)
+   while the next card comes in, instead of snapping bright-to-dim. */
+.fx-bad .m-lan{animation:dim .9s ease-out forwards!important;}
+@keyframes dim{0%{filter:drop-shadow(0 0 8px rgba(255,214,120,.8));opacity:1;}100%{filter:drop-shadow(0 0 1px rgba(255,214,120,.15));opacity:.22;}}
 .fx-bad .pend{animation:swingback .66s ease-out!important;}
 @keyframes swingback{0%{transform:rotate(0);}22%{transform:rotate(-8deg);}50%{transform:rotate(5deg);}75%{transform:rotate(-2deg);}100%{transform:rotate(0);}}
-.fx-bad .m-world{filter:brightness(.72);transition:filter .3s;}
+.fx-bad .m-world{filter:brightness(.72);transition:filter .7s ease-out;}
 @media(prefers-reduced-motion:reduce){.m-enter .m-world,.m-enter .pend{animation:none!important;}}
 /* quiet controls: hint + glass outline ratings (no fills) */
 .reveal-hint{text-align:center;font-size:13px;letter-spacing:.07em;color:rgba(240,212,138,.78);text-shadow:0 1px 10px #000,0 0 14px #000;cursor:pointer;padding:10px 6px;}

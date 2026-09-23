@@ -141,7 +141,7 @@
     if(fxBusy)return;fxBusy=true;
     med.classList.add(kind==="correct"?"fx-good":"fx-bad");
     if(kind==="correct")spawnSparks(med);
-    setTimeout(()=>{fxBusy=false;cb();},kind==="correct"?740:660);
+    setTimeout(()=>{fxBusy=false;cb();},kind==="correct"?740:900);
   }
   // the same ratings as before — the animation just plays first
   const baseRC=window.RC;
