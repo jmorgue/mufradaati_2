@@ -36,12 +36,20 @@
   const baseR=window.R;
   window.R=function(){baseR.apply(this,arguments);hydrateMedina();};
 
-  // ── Space reveals the answer (the hint promises it) ──
+  // ── keyboard-only review: Space reveals, then j/k/l grade the card ──
+  // j = demote (Again), k = stay (Hard), l = move up (Good) — same three
+  // buttons under the card, just reachable without a mouse.
   addEventListener("keydown",e=>{
-    if(e.code!=="Space"&&e.key!==" "&&e.key!=="Spacebar")return;
     const t=e.target;
     if(t&&(/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName)||t.isContentEditable))return;
-    if(typeof view!=="undefined"&&view==="review"&&!fl){e.preventDefault();FC();}
+    if(typeof view==="undefined"||view!=="review")return;
+    const isSpace=e.code==="Space"||e.key===" "||e.key==="Spacebar";
+    if(isSpace&&!fl){e.preventDefault();FC();return;}
+    if(!fl)return;
+    const k=e.key.toLowerCase();
+    if(k==="j"){e.preventDefault();RC("again");}
+    else if(k==="k"){e.preventDefault();RC("hard");}
+    else if(k==="l"){e.preventDefault();RC("good");}
   });
 
   // ── sky follows the clock (updated every 5 minutes); stars = mastered words ──

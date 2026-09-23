@@ -299,6 +299,9 @@ Return ONLY a valid JSON array of ${batch.length} strings, in the same order, no
 let vaultSelected=new Set(); // ids checked in select mode
 let vaultSelectMode=false;
 let vaultFilter="";
+// Same select-then-bulk-move pattern, but for any non-Vault box on the Levels tab.
+let lvlSelected=new Set();
+let lvlSelectMode=false;
 let vaultRandomN=10;
 let vaultUndo=null; // {ids,target} for the most recent Fill-Level-1 / Add-N move
 
@@ -1255,7 +1258,7 @@ function rH(){
 }
 
 // ── LEVELS ──
-function GL(id){al=id;if(id!=="V"){vaultSelectMode=false;vaultSelected.clear();vaultFilter="";}V("levels");}
+function GL(id){al=id;vaultSelectMode=false;vaultSelected.clear();vaultFilter="";lvlSelectMode=false;lvlSelected.clear();V("levels");}
 function rVault(tabs){
   const lv=lvi("V");
   const all=vaultWords();
@@ -1313,11 +1316,12 @@ function rVault(tabs){
     <button onclick="setVaultSelectMode(${!vaultSelectMode})" style="background:${vaultSelectMode?"rgba(217,180,94,.15)":"transparent"};border:1px solid rgba(217,180,94,${vaultSelectMode?".45":".18"});border-radius:8px;padding:9px 14px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:12px;flex-shrink:0">${vaultSelectMode?"Cancel":"Select"}</button>
   </div>
 
-  ${vaultSelectMode?`<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:rgba(217,180,94,0.06);border:1px solid rgba(217,180,94,0.2);border-radius:10px">
-    <span style="flex:1;font-size:12px;color:#EEE8D5">${selectedCount} selected</span>
+  ${vaultSelectMode?`<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:rgba(217,180,94,0.06);border:1px solid rgba(217,180,94,0.2);border-radius:10px;flex-wrap:wrap">
+    <span style="flex:1;font-size:12px;color:#EEE8D5;min-width:70px">${selectedCount} selected</span>
     <button onclick="selectAllFilteredVault()" style="background:transparent;border:1px solid rgba(217,180,94,.25);border-radius:6px;padding:5px 10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px">All ${vaultFilter?"shown":""}</button>
     <button onclick="vaultSelected.clear();R()" style="background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:5px 10px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px">None</button>
-    <button onclick="promoteFromVault([...vaultSelected],'L1Q')" ${selectedCount?"":"disabled"} style="background:rgba(240,122,122,0.15);border:1px solid #F07A7A;border-radius:6px;padding:5px 12px;color:#F07A7A;cursor:${selectedCount?"pointer":"not-allowed"};opacity:${selectedCount?1:.45};font-family:inherit;font-size:11px;font-weight:600">→ L1 Queue</button>
+    <select id="vault-bulk-target" style="background:var(--panel);border:1px solid rgba(217,180,94,0.25);border-radius:6px;color:#8DB5A5;font-family:inherit;font-size:11px;padding:5px 6px;cursor:pointer">${LV.filter(l=>l.id!=="V").map(l=>`<option value="${l.id}"${l.id==="L1Q"?" selected":""}>${l.l}</option>`).join("")}</select>
+    <button onclick="promoteFromVault([...vaultSelected],document.getElementById('vault-bulk-target').value)" ${selectedCount?"":"disabled"} style="background:rgba(240,122,122,0.15);border:1px solid #F07A7A;border-radius:6px;padding:5px 12px;color:#F07A7A;cursor:${selectedCount?"pointer":"not-allowed"};opacity:${selectedCount?1:.45};font-family:inherit;font-size:11px;font-weight:600">Move →</button>
   </div>`:""}
 
   ${vaultFilter?`<div style="font-size:11px;color:#8DB5A5;margin-bottom:8px">${shown.length} of ${all.length} shown</div>`:""}
@@ -1353,19 +1357,22 @@ function rL(){
       const stars=al==="M"?bonusStars(prog[w.id]):0;
       const starStr=stars>0?` · <span style="color:#5FD3A0">${"★".repeat(stars)}</span>`:"";
       const qBadge=isQueue?`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType} · queued ${queueDateLabel(qDate)}</div>`:`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${starStr}</div>`;
-      return`<div class="wr" style="border:1px solid rgba(${rgb(lv.c)},0.2)">
+      const sel=lvlSelected.has(w.id);
+      return`<div class="wr" style="border:1px solid ${sel?"rgba(217,180,94,.45)":`rgba(${rgb(lv.c)},0.2)`};background:${sel?"rgba(217,180,94,.07)":""}">
+      ${lvlSelectMode?`<input type="checkbox" ${sel?"checked":""} onchange="toggleLvlSelect('${w.id}')" style="width:16px;height:16px;accent-color:#D9B45E;cursor:pointer;flex-shrink:0"/>`:""}
       <div style="${arS(w)}${arAlign(w)}font-size:20px;flex:0 0 auto;min-width:65px;color:#F0D48A">${arT(w)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;color:#EEE8D5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.english}</div>
         ${qBadge}
       </div>
-      <div style="display:flex;gap:1px;flex-shrink:0">
+      ${lvlSelectMode?"":`<div style="display:flex;gap:1px;flex-shrink:0">
         <button onclick="MWto('${w.id}','V')" title="Send to Vault" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">🗄</button>
         <select onchange="MWto('${w.id}',this.value)" title="Move to any box" style="background:var(--panel);border:1px solid rgba(217,180,94,0.25);border-radius:6px;color:#8DB5A5;font-family:inherit;font-size:11px;padding:2px 3px;max-width:74px;cursor:pointer"><option value="">Move…</option>${LV.filter(l=>l.id!==al).map(l=>`<option value="${l.id}">${l.l}</option>`).join("")}</select>
         ${li>0?`<button onclick="MW('${w.id}',-1)" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">↓</button>`:""}
         ${li<LV.length-1?`<button onclick="MW('${w.id}',1)" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">↑</button>`:""}
         ${w.id.startsWith("seed-")?"":` <button onclick="DW('${w.id}')" style="background:none;border:none;cursor:pointer;color:rgba(240,122,122,.45);font-size:16px;padding:3px 5px">×</button>`}
-      </div></div>`;
+      </div>`}
+      </div>`;
     }).join("");
 
   // Waiting boxes no longer have a manual promote UI — release is tied to
@@ -1380,6 +1387,7 @@ function rL(){
   // L1Q/L3Q/L4Q have no automatic or in-session release any more — only this manual button moves them.
   const canManualRelease=isQueue&&al!=="L2A"&&al!=="L5A";
 
+  const selectedCount=lvlSelected.size;
   return`<div class="ts">${tabs}</div>
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
     <div>
@@ -1387,23 +1395,44 @@ function rL(){
       <div style="font-size:11px;color:#8DB5A5;margin-top:3px">${lw.length} word${lw.length!==1?"s":""}</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${lw.length?`<button onclick="setLvlSelectMode(${!lvlSelectMode})" style="background:${lvlSelectMode?"rgba(217,180,94,.15)":"transparent"};border:1px solid rgba(217,180,94,${lvlSelectMode?".45":".3"});border-radius:8px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">${lvlSelectMode?"Cancel":"Select"}</button>`:""}
       ${lw.length&&canManualRelease?`<button onclick="manualRelease('${al}')" title="Send every word in this box to ${lvi(queueTargets[al]).l}" style="background:none;border:1px solid rgba(217,180,94,0.4);border-radius:8px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">↑ Release to ${lvi(queueTargets[al]).l}</button>`:""}
       ${lw.length?`<button onclick="demoteAllToVault('${al}')" title="Send every word in this box back to the Vault" style="background:none;border:1px solid rgba(141,181,165,0.35);border-radius:8px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px;padding:6px 12px">🗄 Send all to Vault</button>`:""}
     </div>
   </div>
+  ${lvlSelectMode?`<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;padding:10px 12px;background:rgba(217,180,94,0.06);border:1px solid rgba(217,180,94,0.2);border-radius:10px;flex-wrap:wrap">
+    <span style="flex:1;font-size:12px;color:#EEE8D5;min-width:70px">${selectedCount} selected</span>
+    <button onclick="selectAllInBox()" style="background:transparent;border:1px solid rgba(217,180,94,.25);border-radius:6px;padding:5px 10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px">All</button>
+    <button onclick="lvlSelected.clear();R()" style="background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:5px 10px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px">None</button>
+    <select id="lvl-bulk-target" style="background:var(--panel);border:1px solid rgba(217,180,94,0.25);border-radius:6px;color:#8DB5A5;font-family:inherit;font-size:11px;padding:5px 6px;cursor:pointer">${LV.filter(l=>l.id!==al).map(l=>`<option value="${l.id}">${l.l}</option>`).join("")}</select>
+    <button onclick="moveSelectedTo(document.getElementById('lvl-bulk-target').value)" ${selectedCount?"":"disabled"} style="background:rgba(217,180,94,0.15);border:1px solid #D9B45E;border-radius:6px;padding:5px 12px;color:#D9B45E;cursor:${selectedCount?"pointer":"not-allowed"};opacity:${selectedCount?1:.45};font-family:inherit;font-size:11px;font-weight:600">Move →</button>
+    <button onclick="demoteSelectedToVault()" ${selectedCount?"":"disabled"} style="background:rgba(141,181,165,0.15);border:1px solid rgba(141,181,165,.6);border-radius:6px;padding:5px 12px;color:#8DB5A5;cursor:${selectedCount?"pointer":"not-allowed"};opacity:${selectedCount?1:.45};font-family:inherit;font-size:11px;font-weight:600">🗄 → Vault</button>
+  </div>`:""}
   ${releaseNote}
   ${rows}`;
 }
 // Manual release for L1Q/L3Q/L4Q: nothing moves them any more except this.
+// Shared mover: moves a list of word ids into a box, preserving their
+// current relative order so they land at the end of the destination in
+// order (per the box-order rule). No confirm, no save, no toast — callers
+// handle those, since "move all in a box" and "move my selection" confirm
+// differently.
+async function moveIdsToBox(ids,target){
+  if(!ids||!ids.length||!target||!VI.has(target))return 0;
+  const ordered=bw().filter(w=>ids.includes(w.id)).sort(byOrder);
+  const now=Date.now();
+  ordered.forEach((w,i)=>{prog[w.id]={...(prog[w.id]||{}),leitnerLevel:target,nextReview:nrf(target)||now,queuedAt:now+i};});
+  await saveProgressToDB();
+  return ordered.length;
+}
 async function manualRelease(boxId){
   const target={"L1Q":"L1","L3Q":"L3","L4Q":"L4"}[boxId];
   if(!target)return;
   const ids=bw().filter(w=>w.leitnerLevel===boxId).map(w=>w.id);
   if(!ids.length)return;
   if(!confirm(`Move all ${ids.length} word(s) from ${lvi(boxId).l} into ${lvi(target).l}?`))return;
-  releaseAll(boxId,target);
-  await saveProgressToDB();
-  toast(`${ids.length} word${ids.length!==1?"s":""} → ${lvi(target).l} ✓`);
+  const n=await moveIdsToBox(ids,target);
+  toast(`${n} word${n!==1?"s":""} → ${lvi(target).l} ✓`);
   R();
 }
 // Demote every word currently in a box back to the Vault, by hand, on request.
@@ -1411,10 +1440,30 @@ async function demoteAllToVault(boxId){
   const ids=bw().filter(w=>w.leitnerLevel===boxId).map(w=>w.id);
   if(!ids.length)return;
   if(!confirm(`Send all ${ids.length} word(s) in ${lvi(boxId).l} back to the Vault?`))return;
-  const now=Date.now();
-  ids.forEach((id,i)=>{prog[id]={...(prog[id]||{}),leitnerLevel:"V",nextReview:now,queuedAt:now+i};});
-  await saveProgressToDB();
-  toast(`${ids.length} word${ids.length!==1?"s":""} sent to the Vault ✓`);
+  const n=await moveIdsToBox(ids,"V");
+  toast(`${n} word${n!==1?"s":""} sent to the Vault ✓`);
+  R();
+}
+// ── multi-select on the Levels tab (any non-Vault box) ──
+function toggleLvlSelect(id){if(lvlSelected.has(id))lvlSelected.delete(id);else lvlSelected.add(id);R();}
+function setLvlSelectMode(on){lvlSelectMode=!!on;if(!on)lvlSelected.clear();R();}
+function selectAllInBox(){bw().filter(w=>w.leitnerLevel===al).forEach(w=>lvlSelected.add(w.id));R();}
+async function demoteSelectedToVault(){
+  const ids=[...lvlSelected];
+  if(!ids.length)return;
+  if(!confirm(`Send ${ids.length} selected word(s) to the Vault?`))return;
+  const n=await moveIdsToBox(ids,"V");
+  toast(`${n} word${n!==1?"s":""} sent to the Vault ✓`);
+  lvlSelected.clear();lvlSelectMode=false;
+  R();
+}
+async function moveSelectedTo(target){
+  const ids=[...lvlSelected];
+  if(!ids.length||!target)return;
+  if(!confirm(`Move ${ids.length} selected word(s) to ${lvi(target).l}?`))return;
+  const n=await moveIdsToBox(ids,target);
+  toast(`${n} word${n!==1?"s":""} → ${lvi(target).l} ✓`);
+  lvlSelected.clear();lvlSelectMode=false;
   R();
 }
 function MW(id,d){const words=bw();const w=words.find(x=>x.id===id);if(!w)return;const ci=LV.findIndex(l=>l.id===w.leitnerLevel);const ni=Math.min(Math.max(ci+d,0),LV.length-1);const nl=LV[ni].id;prog[id]={leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now()};scheduleSync();R();}
@@ -1931,9 +1980,9 @@ function rRV(){
   const arStyle=`${arS(card)}font-size:${isLatin(card)?38:50}px;text-align:center;line-height:1.5;color:#F0D48A`;
   const btns=fl?`<div style="font-size:11px;color:#8DB5A5;text-align:center;margin-bottom:8px;text-shadow:0 1px 8px #000">Currently <span style="color:${lv.c};font-weight:600">${lv.l}</span></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-      <button class="rb glass bad" onclick="RC('again')"><div>Again</div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">→ ${lvi(ad).l}</div></button>
-      <button class="rb glass hard" onclick="RC('hard')"><div>Hard</div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">Stay</div></button>
-      <button class="rb glass good" onclick="RC('good')"><div>Good</div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">→ ${lvi(gd).l}</div></button>
+      <button class="rb glass bad" onclick="RC('again')"><div>Again <span class="hint-key" style="opacity:.5;font-weight:400">[J]</span></div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">→ ${lvi(ad).l}</div></button>
+      <button class="rb glass hard" onclick="RC('hard')"><div>Hard <span class="hint-key" style="opacity:.5;font-weight:400">[K]</span></div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">Stay</div></button>
+      <button class="rb glass good" onclick="RC('good')"><div>Good <span class="hint-key" style="opacity:.5;font-weight:400">[L]</span></div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">→ ${lvi(gd).l}</div></button>
     </div>`:`<div class="reveal-hint" onclick="FC()"><span class="hint-key">Press space to reveal the answer</span><span class="hint-tap">Tap the card to reveal the answer</span></div>`;
   return`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
     <button onclick="ER()" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:16px;padding:0;line-height:1">×</button>
