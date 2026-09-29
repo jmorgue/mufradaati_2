@@ -194,6 +194,13 @@ function sessionBudget(){const v=gLS("mufradat-session-budget");return v===null?
 function setSessionBudget(n){sLS("mufradat-session-budget",n);R();}
 function prioritizeTypes(){const v=gLS("mufradat-prioritize-types");return v===null?true:!!v;}
 function setPrioritizeTypes(on){sLS("mufradat-prioritize-types",!!on);R();}
+// Dialect + word-type filter for the session about to start (Review Setup).
+// Dialect (df) is shared with the Home screen's pills; word type (wtf) only
+// exists here, so e.g. "Darija verbs" or "Shaami nouns" narrows the whole
+// session down to exactly that slice, across every selected level.
+function sessionMatch(w){return(df==="All"||w.dialect===df)&&(wtf==="All"||w.wordType===wtf);}
+function setSessionDialect(d){df=d;R();}
+function setSessionWordType(t){wtf=t;R();}
 
 // Efraimidis–Spirakis weighted sampling without replacement:
 // give each item the key U^(1/weight) and take the largest keys.
@@ -627,6 +634,7 @@ function sLS(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
 // State
 let CU=null; // current user {id,username}
 let prog={},uw=[],wt=60,view="auth",al="L1",df="All",el=new Set(["L1"]);
+let wtf="All"; // word-type filter for the NEXT session only (Review Setup); "All" = no restriction
 let rq=[],ri=0,rd="en-ar",rr=[],fl=false;
 // Review-session engine: sessionSteps is the fixed high-to-low list of boxes
 // for this session; stepIdx tracks which one is currently running; rq/ri are
@@ -1832,21 +1840,30 @@ function rRS(){
   <div style="height:14px"></div>
   ${(()=>{
     const words=bw();
-    const pool=words.filter(w=>el.has(w.leitnerLevel)&&(df==="All"||w.dialect===df));
+    const poolForLevels=words.filter(w=>el.has(w.leitnerLevel));
+    const pool=poolForLevels.filter(sessionMatch);
     const budget=sessionBudget();
     const prio=prioritizeTypes();
     const chip=(label,val)=>{
       const on=(val===null&&budget===null)||val===budget;
       return`<button onclick="setSessionBudget(${val===null?"null":val})" style="flex:1;min-width:50px;padding:9px 4px;background:${on?"rgba(217,180,94,0.15)":"transparent"};border:1px solid ${on?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:8px;color:${on?"#D9B45E":"#8DB5A5"};cursor:pointer;font-family:inherit;font-size:12px;font-weight:${on?"600":"400"}">${label}</button>`;
     };
+    const pill=(label,active,handler)=>`<button onclick="${handler}" style="padding:6px 13px;border-radius:20px;border:1px solid ${active?"rgba(217,180,94,.5)":"rgba(217,180,94,.18)"};background:${active?"rgba(217,180,94,.15)":"transparent"};color:${active?"#D9B45E":"#8DB5A5"};font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap">${label}</button>`;
+    const dialectsHere=["All",...new Set(poolForLevels.map(w=>w.dialect))];
+    const typesHere=["All",...new Set(poolForLevels.map(w=>w.wordType))];
     const verbsN=pool.filter(w=>w.wordType==="Verb").length;
-    return`${sh("Size Per Step")}
+    return`${sh("Narrow It Down")}
+    <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Dialect</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${dialectsHere.map(d=>pill(d,df===d,`setSessionDialect('${d}')`)).join("")}</div>
+    <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Word Type</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${typesHere.map(t=>pill(t,wtf===t,`setSessionWordType('${t}')`)).join("")}</div>
+    ${sh("Size Per Step")}
     <div style="display:flex;gap:6px;margin-bottom:10px">
       ${SESSION_SIZES.map(n=>chip(n,n)).join("")}${chip("All",null)}
     </div>
     <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:14px 16px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-        <span style="font-size:12px;color:#8DB5A5">${pool.length} word${pool.length!==1?"s":""} across selected levels</span>
+        <span style="font-size:12px;color:#8DB5A5">${pool.length} word${pool.length!==1?"s":""}${df==="All"&&wtf==="All"?" across selected levels":` · ${[df,wtf].filter(v=>v!=="All").join(" · ")}`}</span>
         <span style="font-size:11px;color:#8DB5A5">${verbsN} verb${verbsN!==1?"s":""}</span>
       </div>
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -1889,7 +1906,7 @@ function startSession(d){
   const enabled=new Set(RO.filter(id=>el.has(id)));
   enabled.add("L1"); // always runs, always last
   sessionSteps=RO.filter(id=>enabled.has(id));
-  const total=sessionSteps.reduce((n,id)=>n+bw().filter(w=>w.leitnerLevel===id&&(df==="All"||w.dialect===df)).length,0);
+  const total=sessionSteps.reduce((n,id)=>n+bw().filter(w=>w.leitnerLevel===id&&sessionMatch(w)).length,0);
   if(!total){toast("Nothing to review in the selected levels","#D9B45E");return;}
   rd=d;stepIdx=0;rr=[];fl=false;pendingRelease=null;sessionActive=true;
   setupStep();
@@ -1897,7 +1914,7 @@ function startSession(d){
 function setupStep(){
   if(stepIdx>=sessionSteps.length)return endSession();
   const level=sessionSteps[stepIdx];
-  let pool=bw().filter(w=>w.leitnerLevel===level&&(df==="All"||w.dialect===df));
+  let pool=bw().filter(w=>w.leitnerLevel===level&&sessionMatch(w));
   const budget=sessionBudget();
   if(budget&&pool.length>budget){
     const{picked}=buildSession(pool,budget,prioritizeTypes());
