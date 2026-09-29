@@ -858,7 +858,10 @@ async function saveProgressToDB(){
   syncing=false;setSyncDot(failed);
   if(pendingResync){pendingResync=false;saveProgressToDB();}
 }
-function scheduleSync(){saveProgLocal();clearTimeout(pendingSync);pendingSync=setTimeout(()=>saveProgressToDB(),2000);}
+// 2000ms made sense when every save re-uploaded the whole deck (expensive
+// enough that debouncing hard mattered). Now a save only sends what changed,
+// so there's no reason to make the dot sit on "syncing" that long between cards.
+function scheduleSync(){saveProgLocal();clearTimeout(pendingSync);pendingSync=setTimeout(()=>saveProgressToDB(),500);}
 function setSyncDot(errorOrSyncing){
   const d=document.getElementById("sync-dot");if(!d)return;
   if(!navigator.onLine){d.className="sync-dot offline";d.title="Offline — changes will sync when you reconnect";d.onclick=null;return;}
@@ -3114,17 +3117,30 @@ function ET(){const n=prompt("Set Level 1 word target:",wt);if(n&&parseInt(n)>0)
   R();
   // Safety net: best-effort sync on tab close. Uses fetch+keepalive so we can
   // send the auth headers Supabase requires (sendBeacon can't set them).
+  // IMPORTANT: a keepalive fetch is capped by the browser at roughly 64KB
+  // total — stuffing your whole deck into one uncapped request silently
+  // exceeds that on any real-sized deck, and the failure was swallowed
+  // (.catch(()=>{})), so a move made right before switching away could be
+  // lost with no error at all. Only send what's actually unsynced (same
+  // diff as saveProgressToDB), and chunk it, so this request is almost
+  // always tiny and never one giant unchunked blob.
   function flushOnExit(){
     if(!CU)return;
     const headers={"apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=minimal"};
-    if(uw.length){
-      const wordRows=uw.map(w=>({user_id:CU.id,word_id:w.id,arabic:w.arabic,english:w.english,example:w.example||"",word_type:w.wordType||"Noun",dialect:w.dialect||"MSA",created_at:w.createdAt?new Date(w.createdAt).toISOString():new Date().toISOString()}));
-      try{fetch(`${SB_URL}/rest/v1/user_words?on_conflict=user_id,word_id`,{method:"POST",headers,body:JSON.stringify(wordRows),keepalive:true}).catch(()=>{});}catch(e){}
+    const CH=50;
+    const wordRows=uw.filter(w=>lastSyncedWords[w.id]!==wordSyncSnap(w))
+      .map(w=>({user_id:CU.id,word_id:w.id,arabic:w.arabic,english:w.english,example:w.example||"",word_type:w.wordType||"Noun",dialect:w.dialect||"MSA",created_at:w.createdAt?new Date(w.createdAt).toISOString():new Date().toISOString()}));
+    for(let i=0;i<wordRows.length;i+=CH){
+      try{fetch(`${SB_URL}/rest/v1/user_words?on_conflict=user_id,word_id`,{method:"POST",headers,body:JSON.stringify(wordRows.slice(i,i+CH)),keepalive:true}).catch(()=>{});}catch(e){}
     }
-    if(Object.keys(prog).length){
-      const rows=Object.entries(prog).map(([word_id,v])=>({user_id:CU.id,word_id,leitner_level:v.leitnerLevel,next_review:v.nextReview,queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,bonus_correct:v.bonusCorrect||0,bonus_wrong:v.bonusWrong||0,updated_at:new Date().toISOString()}));
-      try{fetch(`${SB_URL}/rest/v1/progress?on_conflict=user_id,word_id`,{method:"POST",headers,body:JSON.stringify(rows),keepalive:true}).catch(()=>{});}catch(e){}
+    const rows=Object.entries(prog).filter(([word_id,v])=>lastSyncedProg[word_id]!==progSyncSnap(v))
+      .map(([word_id,v])=>({user_id:CU.id,word_id,leitner_level:v.leitnerLevel,next_review:(v.nextReview==null)?Date.now():v.nextReview,queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,bonus_correct:v.bonusCorrect||0,bonus_wrong:v.bonusWrong||0,updated_at:new Date().toISOString()}));
+    for(let i=0;i<rows.length;i+=CH){
+      try{fetch(`${SB_URL}/rest/v1/progress?on_conflict=user_id,word_id`,{method:"POST",headers,body:JSON.stringify(rows.slice(i,i+CH)),keepalive:true}).catch(()=>{});}catch(e){}
     }
+    // Fire-and-forget — we can't confirm these landed, so lastSynced* is left
+    // alone. If the page survives (came back from background, etc.) the next
+    // normal saveProgressToDB() will just re-attempt the same rows.
   }
   window.addEventListener("beforeunload",flushOnExit);
   // Mobile browsers often skip beforeunload — visibilitychange is more reliable
