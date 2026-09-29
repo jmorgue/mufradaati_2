@@ -645,6 +645,11 @@ let ir=null,syncing=false,pendingSync=null,pendingResync=false;
 let importImages=[]; // {dataUrl, base64, mediaType, name} — screenshots pending OCR extraction
 const MAX_IMPORT_IMAGES=5;
 let lastSyncError=null; // most recent sync error message (surfaced in UI)
+// Snapshots of the last state we actually confirmed synced to the cloud, keyed
+// by id, value = a serialized string of the fields we'd upload. saveProgressToDB
+// diffs against these so a sync only uploads what changed — not your whole
+// deck — which is what made moving through a big deck feel slow.
+let lastSyncedWords={},lastSyncedProg={};
 let authTab="login";
 
 // Build a local-time YYYY-MM-DD key from a queued-at timestamp (ms or null)
@@ -716,6 +721,9 @@ async function loadProgressFromDB(){
       const prevCount=uw.length;
       uw=wordRows.map(r=>({id:r.word_id,arabic:r.arabic,english:r.english,example:r.example||"",wordType:r.word_type,dialect:r.dialect,createdAt:new Date(r.created_at).getTime()}));
       saveUW();
+      // These rows just came FROM the DB — mark them synced so the next save
+      // doesn't immediately re-upload your whole word list.
+      uw.forEach(w=>{lastSyncedWords[w.id]=wordSyncSnap(w);});
       if(prevCount)guardDeckSize(prevCount);
     }
   }catch(e){
@@ -760,6 +768,9 @@ async function loadProgressFromDB(){
         bonusWrong:r.bonus_wrong||0
       };
       applied++;
+      // Just loaded FROM the DB — mark synced so the next save doesn't
+      // immediately re-upload every row of progress you already have there.
+      lastSyncedProg[r.word_id]=progSyncSnap(prog[r.word_id]);
     });
     console.log(`[Load] ${applied} progress rows applied${usedFallback?" (bonus columns missing — run the migration)":""}`);
     if(skipped.length)console.warn("[Load] unrecognized levels skipped:",[...new Set(skipped)]);
@@ -771,32 +782,69 @@ async function loadProgressFromDB(){
   setSyncDot(false);
   return ok;
 }
+// Stable comparison snapshots for the diff in saveProgressToDB. These must NOT
+// embed a freshly-generated fallback timestamp (Date.now()/new Date()) or every
+// row would look "changed" on every sync, defeating the whole point.
+function wordSyncSnap(w){
+  return JSON.stringify({arabic:w.arabic,english:w.english,example:w.example||"",word_type:w.wordType||"Noun",dialect:w.dialect||"MSA",created_at:w.createdAt?new Date(w.createdAt).toISOString():null});
+}
+function progSyncSnap(v){
+  return JSON.stringify({
+    leitner_level:v.leitnerLevel,
+    next_review:v.nextReview==null?null:v.nextReview,
+    queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,
+    bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,
+    bonus_correct:v.bonusCorrect||0,
+    bonus_wrong:v.bonusWrong||0
+  });
+}
 async function saveProgressToDB(){
   if(!CU)return;
   saveProgLocal(); // local mirror first — never lose levels to a network failure
   if(syncing){pendingResync=true;return;}
   syncing=true;setSyncDot(true);
   let failed=false;
+  // Only rows that actually changed since the last confirmed sync get sent —
+  // this used to re-upload your entire deck (every word, every level) on
+  // every save, which is what made moving through a big deck feel so slow.
+  const newWordSnaps={},newProgSnaps={};
   try{
-    // Save user-added words
+    // Save user-added words — diffed against lastSyncedWords
     if(uw.length){
-      const wordRows=uw.map(w=>({user_id:CU.id,word_id:w.id,arabic:w.arabic,english:w.english,example:w.example||"",word_type:w.wordType||"Noun",dialect:w.dialect||"MSA",created_at:w.createdAt?new Date(w.createdAt).toISOString():new Date().toISOString()}));
+      const wordRows=[];
+      uw.forEach(w=>{
+        const snap=wordSyncSnap(w);
+        if(lastSyncedWords[w.id]===snap)return;
+        newWordSnaps[w.id]=snap;
+        wordRows.push({user_id:CU.id,word_id:w.id,arabic:w.arabic,english:w.english,example:w.example||"",word_type:w.wordType||"Noun",dialect:w.dialect||"MSA",created_at:w.createdAt?new Date(w.createdAt).toISOString():new Date().toISOString()});
+      });
       for(let i=0;i<wordRows.length;i+=100)await sbUpsert("/user_words?on_conflict=user_id,word_id",wordRows.slice(i,i+100));
     }
-    // Save progress
-    const rows=Object.entries(prog).map(([word_id,v])=>({
-      user_id:CU.id, word_id,
-      leitner_level:v.leitnerLevel,
-      // next_review is NOT NULL in the schema — guard against any code path that left it null
-      next_review:(v.nextReview==null)?Date.now():v.nextReview,
-      queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,
-      bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,
-      bonus_correct:v.bonusCorrect||0,
-      bonus_wrong:v.bonusWrong||0,
-      updated_at:new Date().toISOString()
-    }));
+    // Save progress — same diff, against lastSyncedProg. updated_at is left out
+    // of the comparison (it always "changes") but still sent on every row that
+    // IS going out, so the DB timestamp still advances.
+    const rows=[];
+    Object.entries(prog).forEach(([word_id,v])=>{
+      const snap=progSyncSnap(v);
+      if(lastSyncedProg[word_id]===snap)return;
+      newProgSnaps[word_id]=snap;
+      rows.push({
+        user_id:CU.id, word_id,
+        leitner_level:v.leitnerLevel,
+        // next_review is NOT NULL in the schema — guard against any code path that left it null
+        next_review:(v.nextReview==null)?Date.now():v.nextReview,
+        queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,
+        bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,
+        bonus_correct:v.bonusCorrect||0,
+        bonus_wrong:v.bonusWrong||0,
+        updated_at:new Date().toISOString()
+      });
+    });
     for(let i=0;i<rows.length;i+=100)await sbUpsert("/progress?on_conflict=user_id,word_id",rows.slice(i,i+100));
-    // Success — clear any prior error
+    // Success — remember what we just sent so the next sync skips it unless it
+    // changes again, and clear any prior error.
+    Object.assign(lastSyncedWords,newWordSnaps);
+    Object.assign(lastSyncedProg,newProgSnaps);
     if(lastSyncError){lastSyncError=null;}
   }catch(e){
     failed=true;
@@ -804,6 +852,8 @@ async function saveProgressToDB(){
     console.error("[Sync FAILED] Reviews/adds are NOT being saved to the server. Error:",lastSyncError,e);
     try{sLS("mufradat-last-sync-error",{msg:lastSyncError,at:Date.now()});}catch(_){}
     toast("⚠ Sync failed — tap sync dot for details","#F07A7A");
+    // Not updating lastSynced* here — whatever we tried to send stays "dirty"
+    // so the next sync retries it instead of silently giving up on it.
   }
   syncing=false;setSyncDot(failed);
   if(pendingResync){pendingResync=false;saveProgressToDB();}
@@ -1192,7 +1242,7 @@ async function doAuthRegister(){
   }catch(e){err.textContent=e.message;btn.disabled=false;btn.innerHTML="Create Account →";}
 }
 
-function doLogout(){sLS("mufradat-session",null);CU=null;prog={};uw=[];authTab="login";R();}
+function doLogout(){sLS("mufradat-session",null);CU=null;prog={};uw=[];lastSyncedWords={};lastSyncedProg={};authTab="login";R();}
 
 // ── HOME ──
 function rH(){
