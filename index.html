@@ -717,13 +717,28 @@ async function loadProgressFromDB(){
   // ── user words ──
   try{
     const wordRows=await sbGetAll(`/user_words?user_id=eq.${CU.id}&select=word_id,arabic,english,example,word_type,dialect,created_at&order=created_at.asc`);
-    if(wordRows&&wordRows.length){
+    if(wordRows){
       const prevCount=uw.length;
-      uw=wordRows.map(r=>({id:r.word_id,arabic:r.arabic,english:r.english,example:r.example||"",wordType:r.word_type,dialect:r.dialect,createdAt:new Date(r.created_at).getTime()}));
+      // Local wins for any word we already have — a page refresh right after
+      // adding words (bulk add, single add, apply, root) shouldn't be able to
+      // wipe them out just because the upload hadn't landed yet. Server rows
+      // for ids we DON'T already have locally (e.g. added on another device)
+      // still get merged in.
+      const localIds=new Set(uw.map(w=>w.id));
+      wordRows.forEach(r=>{
+        if(localIds.has(r.word_id))return;
+        uw.push({id:r.word_id,arabic:r.arabic,english:r.english,example:r.example||"",wordType:r.word_type,dialect:r.dialect,createdAt:new Date(r.created_at).getTime()});
+      });
       saveUW();
-      // These rows just came FROM the DB — mark them synced so the next save
-      // doesn't immediately re-upload your whole word list.
-      uw.forEach(w=>{lastSyncedWords[w.id]=wordSyncSnap(w);});
+      // Mark synced only what the server actually confirmed as matching what
+      // we now have locally — if a local copy differs (an unsynced add/edit),
+      // leave it unmarked so the next save uploads it instead of skipping it.
+      wordRows.forEach(r=>{
+        const local=uw.find(w=>w.id===r.word_id);
+        const serverSnap=wordSyncSnap({arabic:r.arabic,english:r.english,example:r.example||"",wordType:r.word_type,dialect:r.dialect,createdAt:new Date(r.created_at).getTime()});
+        lastSyncedWords[r.word_id]=(local&&wordSyncSnap(local)===serverSnap)?serverSnap:undefined;
+        if(lastSyncedWords[r.word_id]===undefined)delete lastSyncedWords[r.word_id];
+      });
       if(prevCount)guardDeckSize(prevCount);
     }
   }catch(e){
@@ -755,22 +770,35 @@ async function loadProgressFromDB(){
     rows.forEach(r=>{
       const lvl=mig(r.leitner_level);
       if(!VI.has(lvl)){skipped.push(r.leitner_level);return;}
-      // Merge onto whatever's already local rather than replacing outright —
-      // stars/strikes (mastered-drill) have no DB column yet and would
-      // otherwise get wiped by every cloud sync.
-      prog[r.word_id]={
-        ...(prog[r.word_id]||{}),
-        leitnerLevel:lvl,
-        nextReview:r.next_review,
-        queuedAt:r.queued_at?new Date(r.queued_at).getTime():null,
-        bonusReviewedAt:r.bonus_reviewed_at?new Date(r.bonus_reviewed_at).getTime():null,
-        bonusCorrect:r.bonus_correct||0,
-        bonusWrong:r.bonus_wrong||0
-      };
+      const existing=prog[r.word_id];
+      // _seedDefault marks a placeholder just assigned moments ago (a seed
+      // word never before tracked locally or remotely) — safe to overwrite.
+      // Anything else already local (a rating, a manual move, a bulk add)
+      // might just not have finished uploading yet — keep it, and leave it
+      // unmarked as synced so the next save re-sends it instead of the load
+      // silently reverting it back to whatever the server still has.
+      // "Unconfirmed" means current local DIFFERS from the last snapshot we know
+      // is synced — not just "never synced before". A word rated/moved after an
+      // earlier successful sync has a defined-but-now-STALE lastSyncedProg entry;
+      // checking only for undefined misses exactly that case.
+      const localIsRealAndUnconfirmed=existing&&!existing._seedDefault&&progSyncSnap(existing)!==lastSyncedProg[r.word_id];
+      if(!localIsRealAndUnconfirmed){
+        prog[r.word_id]={
+          ...(existing||{}),
+          leitnerLevel:lvl,
+          nextReview:r.next_review,
+          queuedAt:r.queued_at?new Date(r.queued_at).getTime():null,
+          bonusReviewedAt:r.bonus_reviewed_at?new Date(r.bonus_reviewed_at).getTime():null,
+          bonusCorrect:r.bonus_correct||0,
+          bonusWrong:r.bonus_wrong||0
+        };
+      }
+      delete prog[r.word_id]._seedDefault;
       applied++;
-      // Just loaded FROM the DB — mark synced so the next save doesn't
-      // immediately re-upload every row of progress you already have there.
-      lastSyncedProg[r.word_id]=progSyncSnap(prog[r.word_id]);
+      // Register what the SERVER currently has as the synced baseline — even
+      // when we kept local instead, so the diff correctly sees local != this
+      // stale baseline and re-uploads on the next save.
+      lastSyncedProg[r.word_id]=progSyncSnap({leitnerLevel:lvl,nextReview:r.next_review,queuedAt:r.queued_at?new Date(r.queued_at).getTime():null,bonusReviewedAt:r.bonus_reviewed_at?new Date(r.bonus_reviewed_at).getTime():null,bonusCorrect:r.bonus_correct||0,bonusWrong:r.bonus_wrong||0});
     });
     console.log(`[Load] ${applied} progress rows applied${usedFallback?" (bonus columns missing — run the migration)":""}`);
     if(skipped.length)console.warn("[Load] unrecognized levels skipped:",[...new Set(skipped)]);
@@ -1213,7 +1241,7 @@ async function doAuthLogin(){
     CU=res.user;sLS("mufradat-session",CU);
     loadUW();
     loadProgLocal();
-    SU.forEach(w=>{const id=sid(w.arabic);if(!prog[id])prog[id]={leitnerLevel:"L1",nextReview:Date.now()};});
+    SU.forEach(w=>{const id=sid(w.arabic);if(!prog[id])prog[id]={leitnerLevel:"L1",nextReview:Date.now(),_seedDefault:true};});
     await flushPendingDeletes();
     const loaded=await loadProgressFromDB();
     cam();
@@ -1238,7 +1266,7 @@ async function doAuthRegister(){
     if(ak)sLS(`mufradat-apikey-${u}`,ak);
     sLS("mufradat-session",CU);
     loadUW();
-    SU.forEach(w=>{const id=sid(w.arabic);if(!prog[id])prog[id]={leitnerLevel:"L1",nextReview:Date.now()};});
+    SU.forEach(w=>{const id=sid(w.arabic);if(!prog[id])prog[id]={leitnerLevel:"L1",nextReview:Date.now(),_seedDefault:true};});
     await saveProgressToDB();
     el=todaysPlan();view="home";R();
     toast("Account created ✓");
@@ -3105,7 +3133,7 @@ function ET(){const n=prompt("Set Level 1 word target:",wt);if(n&&parseInt(n)>0)
     CU=session;loadUW();
     const cached=loadProgLocal();
     if(cached)console.log(`[Boot] ${cached} levels restored from local cache`);
-    SU.forEach(w=>{const id=sid(w.arabic);if(!prog[id])prog[id]={leitnerLevel:"L1",nextReview:Date.now()};});
+    SU.forEach(w=>{const id=sid(w.arabic);if(!prog[id])prog[id]={leitnerLevel:"L1",nextReview:Date.now(),_seedDefault:true};});
     await flushPendingDeletes();
     const loaded=await loadProgressFromDB();
     cam();
