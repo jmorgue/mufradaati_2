@@ -198,7 +198,23 @@ function setPrioritizeTypes(on){sLS("mufradat-prioritize-types",!!on);R();}
 // Dialect (df) is shared with the Home screen's pills; word type (wtf) only
 // exists here, so e.g. "Darija verbs" or "Shaami nouns" narrows the whole
 // session down to exactly that slice, across every selected level.
-function sessionMatch(w){return(df==="All"||w.dialect===df)&&(wtf==="All"||w.wordType===wtf);}
+// Also skips anything already done today, so a second capped session (say
+// 20 more words) is always fresh words, never the ones you just saw.
+function sessionMatch(w){return!heldToday(w)&&(df==="All"||w.dialect===df)&&(wtf==="All"||w.wordType===wtf);}
+
+// ── "done today" tracking ──
+// doneDay (local-only, like stars/strikes — no DB column) is stamped on a word
+// when it's rated in a session, or promoted by a release into a box whose step
+// already ran today. Held words are skipped by every session and the due-count
+// until tomorrow, which is what keeps spaced repetition from repeating you.
+function dayKey(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function heldToday(w){return!!w&&w.doneDay===dayKey();}
+function stepsDoneKey(){return"mufradat-steps-done-"+(CU?CU.username:"");}
+function stepRanToday(box){const s=gLS(stepsDoneKey());return!!(s&&s.day===dayKey()&&(s.boxes||[]).includes(box));}
+function markStepRan(box){const t=dayKey();let s=gLS(stepsDoneKey());if(!s||s.day!==t)s={day:t,boxes:[]};if(!s.boxes.includes(box)){s.boxes.push(box);sLS(stepsDoneKey(),s);}}
+// Words released INTO a box whose step already ran today wait until the next
+// session (tomorrow) instead of showing as due again right away.
+function holdMoved(ids,destBox){if(!stepRanToday(destBox))return;const t=dayKey();ids.forEach(id=>{prog[id]={...(prog[id]||{}),doneDay:t};});}
 function setSessionDialect(d){df=d;R();}
 function setSessionWordType(t){wtf=t;R();}
 
@@ -626,7 +642,7 @@ const lvi=id=>LV.find(l=>l.id===id)||LV[0];
 // A word is "due today" if its box is a study box scheduled in today's Daily
 // Plan — there's no per-card timer anymore, every word in a scheduled box is
 // due together.
-const isDue=w=>{const lv=lvi(w.leitnerLevel);return!!lv.r&&todaysPlan().has(w.leitnerLevel);};
+const isDue=w=>{const lv=lvi(w.leitnerLevel);return!!lv.r&&todaysPlan().has(w.leitnerLevel)&&!heldToday(w);};
 function uid(){return`user-${Date.now()}-${Math.random().toString(36).slice(2,5)}`;}
 function gLS(k){try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}}
 function sLS(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
@@ -1123,9 +1139,9 @@ async function deleteWordCompletely(id){
 
 // Words
 function bw(){
-  const s=SU.map(w=>{const id=sid(w.arabic);const p=prog[id]||{};return{...w,id,createdAt:0,leitnerLevel:p.leitnerLevel||"L1",nextReview:p.nextReview||Date.now(),queuedAt:p.queuedAt||null};});
+  const s=SU.map(w=>{const id=sid(w.arabic);const p=prog[id]||{};return{...w,id,createdAt:0,leitnerLevel:p.leitnerLevel||"L1",nextReview:p.nextReview||Date.now(),queuedAt:p.queuedAt||null,doneDay:p.doneDay||null};});
   const sa=new Set(s.map(w=>w.arabic));
-  const u=uw.filter(w=>!sa.has(w.arabic)).map(w=>{const p=prog[w.id]||{};return{...w,leitnerLevel:mig(p.leitnerLevel||w.leitnerLevel||"L1"),nextReview:p.nextReview||w.nextReview||Date.now(),queuedAt:p.queuedAt||null};});
+  const u=uw.filter(w=>!sa.has(w.arabic)).map(w=>{const p=prog[w.id]||{};return{...w,leitnerLevel:mig(p.leitnerLevel||w.leitnerLevel||"L1"),nextReview:p.nextReview||w.nextReview||Date.now(),queuedAt:p.queuedAt||null,doneDay:p.doneDay||null};});
   return[...s,...u];
 }
 // Box order: a box is an ordered list, oldest entry first. A word's position
@@ -1522,6 +1538,7 @@ async function manualRelease(boxId){
   const ids=bw().filter(w=>w.leitnerLevel===boxId).map(w=>w.id);
   if(!ids.length)return;
   if(!confirm(`Move all ${ids.length} word(s) from ${lvi(boxId).l} into ${lvi(target).l}?`))return;
+  holdMoved(ids,target); // same rule as the in-session prompt: if that box already ran today, they wait until tomorrow
   const n=await moveIdsToBox(ids,target);
   toast(`${n} word${n!==1?"s":""} → ${lvi(target).l} ✓`);
   R();
@@ -1902,7 +1919,9 @@ function rRS(){
   const plan=todaysPlan();
   const togs=RO.map(id=>{
     const lv=lvi(id);
-    const c=words.filter(w=>w.leitnerLevel===id).length;
+    const inBox=words.filter(w=>w.leitnerLevel===id);
+    const h=inBox.filter(heldToday).length; // already done today
+    const c=inBox.length-h;                 // what's actually left to review
     const on=el.has(id);
     const locked=id==="L1"; // L1 always runs, always last — can't be turned off
     const scheduled=plan.has(id);
@@ -1911,7 +1930,7 @@ function rRS(){
       <div class="tp" style="background:${on?lv.c:"rgba(255,255,255,.1)"}"><div class="tk" style="left:${on?"17":"3"}px"></div></div>
       <div style="flex:1"><div style="font-size:14px;font-weight:600;color:${on?lv.c:"#8DB5A5"}">${lv.l}</div>
       <div style="font-size:11px;color:#8DB5A5;margin-top:1px">${subText}</div></div>
-      <div style="font-size:13px;color:${c>0?lv.c:"#8DB5A5"};font-weight:600">${c} word${c!==1?"s":""}</div></div>`;
+      <div style="text-align:right"><div style="font-size:13px;color:${c>0?lv.c:"#8DB5A5"};font-weight:600">${c} word${c!==1?"s":""}</div>${h?`<div style="font-size:10px;color:#8DB5A5;margin-top:1px">${h} done today</div>`:""}</div></div>`;
   }).join("");
   return`<div style="text-align:left;margin-bottom:14px">
     <button onclick="V('home')" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:13px;padding:0">← Back</button></div>
@@ -1944,7 +1963,7 @@ function rRS(){
     </div>
     <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:14px 16px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-        <span style="font-size:12px;color:#8DB5A5">${pool.length} word${pool.length!==1?"s":""}${df==="All"&&wtf==="All"?" across selected levels":` · ${[df,wtf].filter(v=>v!=="All").join(" · ")}`}</span>
+        <span style="font-size:12px;color:#8DB5A5">${pool.length} word${pool.length!==1?"s":""}${df==="All"&&wtf==="All"?" across selected levels":` · ${[df,wtf].filter(v=>v!=="All").join(" · ")}`}${(()=>{const h=poolForLevels.filter(heldToday).length;return h?` · ${h} already done today (skipped)`:"";})()}</span>
         <span style="font-size:11px;color:#8DB5A5">${verbsN} verb${verbsN!==1?"s":""}</span>
       </div>
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -1988,7 +2007,11 @@ function startSession(d){
   enabled.add("L1"); // always runs, always last
   sessionSteps=RO.filter(id=>enabled.has(id));
   const total=sessionSteps.reduce((n,id)=>n+bw().filter(w=>w.leitnerLevel===id&&sessionMatch(w)).length,0);
-  if(!total){toast("Nothing to review in the selected levels","#D9B45E");return;}
+  if(!total){
+    const done=sessionSteps.reduce((n,id)=>n+bw().filter(w=>w.leitnerLevel===id&&heldToday(w)).length,0);
+    toast(done?`All caught up — the ${done} word${done!==1?"s":""} in these levels are done for today`:"Nothing to review in the selected levels","#D9B45E");
+    return;
+  }
   rd=d;stepIdx=0;rr=[];fl=false;pendingRelease=null;sessionActive=true;
   setupStep();
 }
@@ -2014,6 +2037,7 @@ function releaseAll(from,to){
 }
 async function finishStep(){
   const level=sessionSteps[stepIdx];
+  markStepRan(level); // this box has run today — releases into it now wait until tomorrow
   if(level==="L1"){
     // Always last. L1Q no longer clears itself — release it by hand from the
     // Levels tab whenever you're ready (Move… dropdown or "Release to Level 1").
@@ -2046,7 +2070,11 @@ async function finishStep(){
 async function answerRelease(yes){
   if(!pendingRelease)return;
   const{from,to}=pendingRelease;
-  if(yes)releaseAll(from,to);
+  if(yes){
+    const ids=bw().filter(w=>w.leitnerLevel===from).map(w=>w.id);
+    releaseAll(from,to);
+    holdMoved(ids,to); // promoted words wait for the next session, not "still due" in this one
+  }
   pendingRelease=null;
   await saveProgressToDB();
   stepIdx++;
@@ -2134,13 +2162,17 @@ async function ER(){
 }
 async function RC(a){
   const card=rq[ri],level=sessionSteps[stepIdx],isl=ri+1>=rq.length;
-  const nowTs=Date.now();
+  const nowTs=Date.now(),today=dayKey();
+  // Every rating stamps doneDay, so the word is skipped by any later session today.
   if(a==="again"){
-    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:wrongDest(level),nextReview:nowTs,queuedAt:nowTs};
+    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:wrongDest(level),nextReview:nowTs,queuedAt:nowTs,doneDay:today};
   }else if(a==="hard"){
-    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:level,nextReview:nowTs};
+    // Stay = same box, but to the BACK of it. Leaving queuedAt alone kept these
+    // words "oldest", so oldest-first and the 7-day rescue tier re-picked the
+    // very same words at the front of every capped session.
+    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:level,nextReview:nowTs,queuedAt:nowTs,doneDay:today};
   }else{
-    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:correctDest(level),nextReview:nowTs,queuedAt:nowTs};
+    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:correctDest(level),nextReview:nowTs,queuedAt:nowTs,doneDay:today};
   }
   rr.push(a);
   scheduleSync(); // save after every card so progress is never lost
