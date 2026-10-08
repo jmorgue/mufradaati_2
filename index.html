@@ -1099,57 +1099,244 @@ Return ONLY a valid JSON array with one object per verb, in the same order, no m
   });
   return out;
 }
-// Every verb in your deck — every level and the Vault — that doesn't have its
-// prepositions yet.
-function verbsMissingPreps(){return uw.filter(w=>w&&w.wordType==="Verb"&&w.arabic&&!hasPrep(w));}
+// Every verb in your deck — every level and the Vault.
+function allVerbs(){return uw.filter(w=>w&&w.wordType==="Verb"&&w.arabic);}
+function verbsMissingPreps(){return allVerbs().filter(w=>!hasPrep(w));}
+// "Checked" = confirmed against the dictionary, or looked at and accepted /
+// typed by you. Everything else that has prepositions is only the AI's word.
+function prepChecked(w){return!!w&&(w.prepCheck==="dict"||w.prepCheck==="user");}
+function verbsUnchecked(){return allVerbs().filter(w=>hasPrep(w)&&!prepChecked(w));}
 function prepBackupKey(){return"mufradat-prep-backup-"+(CU?CU.username:"");}
-let prepRun={running:false,done:0,total:0,ok:0,failed:0,error:""};
-async function runPrepBackfill(){
+// What you type in a preposition box: "عَنْ / فِي" -> list; "—" or "none" -> []
+// (takes none); blank or unusable -> null.
+function parsePrepInput(s){
+  s=(s||"").trim();
+  if(!s)return null;
+  if(/^[-—–]$|^none$/i.test(s))return[];
+  const parts=s.split(/[\/،,;]+/).map(x=>x.trim()).filter(Boolean);
+  return parts.length?parts:null;
+}
+// The prepositions currently stored on a verb card (null if it has none yet).
+function currentPreps(w){
+  const seg=verbSegs(w&&w.arabic).find(isPrepSeg);
+  if(!seg)return null;
+  const t=seg.replace(/^\+\s*/,"").trim();
+  return(t==="—"||!t)?[]:t.split("/").map(x=>x.trim()).filter(Boolean);
+}
+
+// ── Dictionary check (English Wiktionary) ─────────────────────────
+// The AI's prepositions come from memory, so they're a proposal, not a fact.
+// To corroborate them we compare against English Wiktionary: a human-edited
+// dictionary that records the preposition(s) a verb takes inside its
+// definitions ("to search for (عَنْ …)", "[with فِي or accusative]"). It's
+// independent of the AI — but NOT complete. Where it says nothing the answer
+// stays "unverified": silence is not confirmation.
+const PREP_LIST=["بِ","لِ","فِي","عَنْ","عَلَى","إِلَى","مِنْ","مَعَ","حَتَّى","عِنْدَ","ضِدَّ","نَحْوَ","لَدَى","بَيْنَ","قَبْلَ","بَعْدَ","دُونَ","حَوْلَ","خِلَالَ"];
+const pk=s=>(s||"").replace(/[ً-ٰٟـ]/g,"").replace(/[أإآٱ]/g,"ا").replace(/ى/g,"ي").trim();
+const PREP_BY_KEY=Object.fromEntries(PREP_LIST.map(p=>[pk(p),p]));
+const dStrip=s=>(s||"").replace(/[ً-ٰٟـ]/g,"");
+const dLex=s=>(s||"").replace(/[ً-ٍْٰـ]/g,"").replace(/[أإآٱ]/g,"ا");
+function wiktLangFor(d){return d==="Darija"?/^Moroccan Arabic$/:d==="Shaami"?/Levantine Arabic$/:d==="Egyptian"?/^Egyptian Arabic$/:d==="Gulf"?/^Gulf Arabic$/:/^Arabic$/;}
+// Pull each verb entry (headword + its definition lines) out of a Wiktionary
+// page, for the language section we want, and note which prepositions its
+// definitions mention. Example sentences are skipped on purpose.
+function parseWikt(text,langRe){
+  const entries=[];let lang="",inVerb=false,notes=false,cur=null;
+  for(const raw of String(text||"").split("\n")){
+    const line=raw.trim();if(!line)continue;let m;
+    if((m=line.match(/^==\s*([^=].*?)\s*==$/))){lang=m[1];inVerb=false;notes=false;cur=null;continue;}
+    if((m=line.match(/^={3,}\s*(.+?)\s*={3,}$/))){
+      const name=m[1];
+      if(/^Verb$/i.test(name)){inVerb=true;notes=false;cur=null;}
+      else if(/^Usage notes?$/i.test(name)){inVerb=false;notes=!!cur;}
+      else if(/^Conjugation$/i.test(name)){inVerb=false;notes=false;}
+      else{inVerb=false;notes=false;cur=null;}
+      continue;
+    }
+    if(!langRe.test(lang))continue;
+    if(inVerb&&/ • \(/.test(line)){cur={head:line.split(" • ")[0].trim(),lines:[]};entries.push(cur);continue;}
+    if((inVerb||notes)&&cur){
+      if(line.includes("―"))continue; // example sentence
+      if(/^(Synonym|Antonym|Hypernym|Hyponym|Coordinate|Derived|Related|See also)/i.test(line))continue;
+      cur.lines.push(line);
+    }
+  }
+  entries.forEach(e=>{
+    const found=[];
+    e.lines.forEach(l=>(l.match(/[؀-ۿ]+/g)||[]).forEach(tok=>{const c=PREP_BY_KEY[pk(tok)];if(c&&!found.includes(c))found.push(c);}));
+    e.preps=found;
+    e.direct=/accusative|direct object|transitive/i.test(e.lines.join(" "));
+    e.evidence=e.lines.filter(l=>(l.match(/[؀-ۿ]+/g)||[]).some(tok=>PREP_BY_KEY[pk(tok)])).map(l=>l.length>170?l.slice(0,167)+"…":l);
+  });
+  return entries;
+}
+const wiktCache={};
+async function wiktExtract(title){
+  if(title in wiktCache)return wiktCache[title];
+  const url="https://en.wiktionary.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&origin=*&titles="+encodeURIComponent(title);
+  const res=await fetch(url);
+  if(!res.ok)throw new Error("Dictionary unavailable ("+res.status+")");
+  const j=await res.json();
+  const p=Object.values((j.query&&j.query.pages)||{})[0];
+  return wiktCache[title]=(p&&!p.missing&&p.extract)?p.extract:"";
+}
+// Look every item up (4 at a time) and attach what the dictionary says.
+async function dictLookup(items,onProgress){
+  const queue=items.slice();let done=0;
+  await Promise.all(Array.from({length:4},async()=>{
+    while(queue.length){
+      const it=queue.shift();
+      try{
+        const text=await wiktExtract(dStrip(it.head));
+        const entries=parseWikt(text,wiktLangFor(it.dialect));
+        const exact=entries.filter(e=>dLex(e.head)===dLex(it.head));
+        const loose=!exact.length;
+        const use=exact.length?exact:entries.filter(e=>dLex(dStrip(e.head))===dLex(dStrip(it.head)));
+        const preps=[];use.forEach(e=>e.preps.forEach(p=>{if(!preps.includes(p))preps.push(p);}));
+        const evidence=[];use.forEach(e=>e.evidence.forEach(l=>{if(evidence.length<3&&!evidence.includes(l))evidence.push(l);}));
+        it.dict={ok:true,entryFound:use.length>0,loose:loose&&use.length>0,preps,direct:use.some(e=>e.direct),evidence};
+      }catch(e){it.dict={ok:false,entryFound:false,loose:false,preps:[],direct:false,evidence:[],error:e.message||"offline"};}
+      if(onProgress)onProgress(++done,items.length);
+    }
+  }));
+}
+// Compare a proposal with what the dictionary says.
+//   confirmed — every proposed preposition is listed by the dictionary
+//   partial   — some are listed, some aren't mentioned
+//   conflict  — the dictionary lists prepositions, none of them yours
+//   silent    — the dictionary doesn't cover it: UNVERIFIED
+function classifyPreps(proposed,dict){
+  const P=(proposed||[]).map(pk),D=(dict&&dict.preps||[]).map(pk);
+  if(!dict||!dict.ok)return{status:"silent",why:"Couldn't reach the dictionary"};
+  if(!dict.entryFound)return{status:"silent",why:"The dictionary has no entry for this verb"};
+  if(!P.length){
+    if(D.length)return{status:"conflict",why:"You have it taking no preposition, but the dictionary lists some"};
+    // A mention of "accusative" is NOT proof that no preposition is used (many
+    // verbs take a direct object AND a preposition), so "takes none" is never
+    // confirmed from it — it stays unverified.
+    return{status:"silent",why:dict.direct?"The dictionary mentions a direct object but doesn't say whether a preposition is also used":"The dictionary doesn't say either way"};
+  }
+  if(!D.length)return{status:"silent",why:"The dictionary doesn't mention any preposition for this verb"};
+  const hit=P.filter(p=>D.includes(p)),miss=P.filter(p=>!D.includes(p));
+  if(!hit.length)return{status:"conflict",why:"The dictionary lists different prepositions"};
+  if(miss.length||dict.loose)return{status:"partial",why:dict.loose?"Matched the dictionary by spelling only (the vowels differ)":"Some of these aren't mentioned by the dictionary"};
+  return{status:"confirmed",why:"The dictionary lists this"};
+}
+
+let prepRun={running:false,done:0,total:0,stage:"",error:""};
+let prepReview=null; // {items,filter,shown} while the review screen is open
+function wiktUrl(head){return"https://en.wiktionary.org/wiki/"+encodeURIComponent(dStrip(head))+"#Arabic";}
+function almaanyUrl(head){return"https://www.almaany.com/ar/dict/ar-ar/"+encodeURIComponent(dStrip(head))+"/";}
+
+// Find proposals for verbs that have none, check everything against the
+// dictionary, then show it all for review. NOTHING is saved until you say so.
+async function startPrepReview(){
   if(prepRun.running)return;
   if(!navigator.onLine){toast("This needs a connection","#D9B45E");return;}
-  const todo=verbsMissingPreps();
-  if(!todo.length){toast("Every verb already has its prepositions ✓");return;}
-  if(!(gLS(`mufradat-apikey-${CU.username}`)||"")){toast("No API key — add it in Settings","#F07A7A");V("settings");return;}
-  if(!confirm(`Attach prepositions to ${todo.length} verb${todo.length!==1?"s":""}?\n\nThis adds the preposition(s) each verb takes to its card, in every level and the Vault. Nothing else changes, and you can undo it from Settings.`))return;
-  // Keep the original text so the whole run can be undone.
-  const backup=gLS(prepBackupKey())||{};
-  prepRun={running:true,done:0,total:todo.length,ok:0,failed:0,error:""};R();
-  const BATCH=25;
-  for(let i=0;i<todo.length;i+=BATCH){
-    const batch=todo.slice(i,i+BATCH);
-    try{
-      const results=await fetchPrepsFor(batch);
-      batch.forEach((w,k)=>{
-        const na=attachPreps(w.arabic,results[k]);
-        if(na){if(!(w.id in backup))backup[w.id]=w.arabic;w.arabic=na;prepRun.ok++;}
-        else prepRun.failed++;
-      });
-      saveUW();sLS(prepBackupKey(),backup);
-      await saveProgressToDB();
-    }catch(e){
-      prepRun.failed+=batch.length;prepRun.error=e.message||String(e);
-      console.warn("[prepositions] batch failed:",e);
+  const missing=verbsMissingPreps(),unchecked=verbsUnchecked();
+  const targets=[...missing,...unchecked];
+  if(!targets.length){toast("Every verb already has checked prepositions ✓");return;}
+  const hasKey=!!(gLS(`mufradat-apikey-${CU.username}`)||"");
+  prepRun={running:true,done:0,total:targets.length,stage:"Looking up prepositions…",error:""};
+  prepReview=null;R();
+  // 1. AI proposals for verbs that don't have any yet
+  const proposals=new Map();
+  if(missing.length&&hasKey){
+    for(let i=0;i<missing.length;i+=25){
+      const batch=missing.slice(i,i+25);
+      try{
+        const results=await fetchPrepsFor(batch);
+        batch.forEach((w,k)=>{const raw=results[k];if(Array.isArray(raw)){const clean=cleanPreps(raw);if(!raw.length||clean.length)proposals.set(w.id,clean);}});
+      }catch(e){prepRun.error=e.message||String(e);}
+      prepRun.done=Math.min(i+25,missing.length);R();
     }
-    prepRun.done=Math.min(i+BATCH,todo.length);R();
-  }
-  prepRun.running=false;R();
-  const msg=prepRun.failed?`${prepRun.ok} verbs updated · ${prepRun.failed} couldn't be done — run it again to retry`:`Prepositions added to ${prepRun.ok} verb${prepRun.ok!==1?"s":""} ✓`;
-  toast(msg,prepRun.failed?"#D9B45E":"#5FD3A0");
+  }else if(missing.length){prepRun.error="No API key — add it in Settings to get proposals for verbs that have none.";}
+  // 2. build the review items
+  const items=targets.map(w=>{
+    const had=hasPrep(w);
+    const proposed=had?currentPreps(w):(proposals.has(w.id)?proposals.get(w.id):null);
+    return{id:w.id,head:verbSegs(w.arabic)[0]||w.arabic,english:w.english,dialect:w.dialect||"MSA",had,
+      proposed,edit:proposed===null?"":(proposed.length?proposed.join(" / "):"—"),dirty:false,
+      dict:null,status:"none",why:"",include:false};
+  });
+  // 3. dictionary
+  prepRun.stage="Checking against the dictionary…";prepRun.done=0;prepRun.total=items.length;R();
+  await dictLookup(items,(d)=>{prepRun.done=d;if(d%5===0)R();});
+  items.forEach(it=>{
+    if(it.proposed===null){it.status="none";it.why="No proposal — type one, or use the dictionary's";return;}
+    const c=classifyPreps(it.proposed,it.dict);it.status=c.status;it.why=c.why;
+    it.include=c.status==="confirmed";
+  });
+  const order={conflict:0,partial:1,silent:2,none:3,confirmed:4};
+  items.sort((a,b)=>order[a.status]-order[b.status]);
+  const first=items.some(i=>i.status==="conflict"||i.status==="partial")?"look":items.some(i=>i.status==="silent")?"silent":items.some(i=>i.status==="none")?"none":"confirmed";
+  prepReview={items,filter:first,shown:40};
+  prepRun={running:false,done:0,total:0,stage:"",error:prepRun.error};
+  V("prep-review");
 }
-// Put the verbs from the last run back exactly as they were.
+function prepFilterItems(){
+  const f=prepReview.filter;
+  return prepReview.items.filter(i=>f==="look"?(i.status==="conflict"||i.status==="partial"):i.status===f);
+}
+function prepSetFilter(f){prepReview.filter=f;prepReview.shown=40;R();}
+function prepMore(){prepReview.shown+=40;R();}
+function prepToggle(id){const it=prepReview.items.find(x=>x.id===id);if(it){it.include=!it.include;R();}}
+function prepEdit(id,val){const it=prepReview.items.find(x=>x.id===id);if(it){it.edit=val;it.dirty=true;}}
+function prepUseDict(id){
+  const it=prepReview.items.find(x=>x.id===id);if(!it||!it.dict||!it.dict.preps.length)return;
+  it.edit=it.dict.preps.join(" / ");it.dirty=true;it.include=true;R();
+}
+function prepSelectConfirmed(){prepReview.items.forEach(i=>{if(i.status==="confirmed")i.include=true;});R();}
+function prepSelectNone(){prepReview.items.forEach(i=>{i.include=false;});R();}
+function prepCancel(){prepReview=null;V("settings");}
+async function savePrepReview(){
+  const r=prepReview;if(!r)return;
+  const backup=gLS(prepBackupKey())||{};let n=0,bad=0;
+  r.items.forEach(it=>{
+    if(!it.include)return;
+    const w=uw.find(x=>x.id===it.id);if(!w)return;
+    const list=parsePrepInput(it.edit);
+    const na=list===null?null:attachPreps(w.arabic,list);
+    if(!na){bad++;return;}
+    if(!(w.id in backup))backup[w.id]=w.arabic;
+    w.arabic=na;
+    // "dict" only when the dictionary agreed with exactly what was saved
+    w.prepCheck=(it.status==="confirmed"&&!it.dirty)?"dict":"user";
+    n++;
+  });
+  saveUW();sLS(prepBackupKey(),backup);
+  await saveProgressToDB();
+  prepReview=null;
+  toast(bad?`${n} saved · ${bad} had unusable prepositions (left alone)`:`${n} verb${n!==1?"s":""} saved ✓`,bad?"#D9B45E":"#5FD3A0");
+  V("settings");
+}
+// Put the verbs from the last review(s) back exactly as they were.
 async function undoPrepBackfill(){
   const backup=gLS(prepBackupKey())||{};
   const ids=Object.keys(backup);
   if(!ids.length){toast("Nothing to undo","#D9B45E");return;}
-  if(!confirm(`Put ${ids.length} verb${ids.length!==1?"s":""} back the way they were, without their prepositions?`))return;
+  if(!confirm(`Put ${ids.length} verb${ids.length!==1?"s":""} back the way they were?`))return;
   let n=0;
-  ids.forEach(id=>{const w=uw.find(x=>x.id===id);if(w&&hasPrep(w)){w.arabic=backup[id];n++;}});
+  ids.forEach(id=>{const w=uw.find(x=>x.id===id);if(w){w.arabic=backup[id];delete w.prepCheck;n++;}});
   sLS(prepBackupKey(),{});
   saveUW();await saveProgressToDB();
   toast(`${n} verb${n!==1?"s":""} restored`);R();
 }
+// Fix one verb's prepositions by hand, any time. Counts as checked by you.
+async function editPreps(id){
+  const w=uw.find(x=>x.id===id);if(!w||w.wordType!=="Verb")return;
+  const cur=currentPreps(w);
+  const ans=prompt(`Prepositions for ${verbSegs(w.arabic)[0]}\n\nSeparate several with /  —  type — if it takes none.`,cur===null?"":(cur.length?cur.join(" / "):"—"));
+  if(ans===null)return;
+  const list=parsePrepInput(ans);
+  const na=list===null?null:attachPreps(w.arabic,list);
+  if(!na){toast("Couldn't read that — use Arabic prepositions like عَنْ / فِي","#F07A7A");return;}
+  w.arabic=na;w.prepCheck="user";
+  saveUW();await saveProgressToDB();R();
+}
 // Look up prepositions for just-added verbs that didn't come with them
 // (typed by hand, or the AI skipped one). Quiet: it never blocks the add.
+// These stay "unchecked" until you run the dictionary check.
 async function attachPrepsInBackground(ids){
   const ws=(ids||[]).map(id=>uw.find(w=>w.id===id)).filter(w=>w&&w.wordType==="Verb"&&!hasPrep(w));
   if(!ws.length||!navigator.onLine)return;
@@ -1160,31 +1347,102 @@ async function attachPrepsInBackground(ids){
     if(n){saveUW();await saveProgressToDB();R();}
   }catch(e){console.warn("[prepositions] background lookup skipped:",e.message||e);}
 }
+// Small tag on verb rows: how much to trust the prepositions on this card.
+function prepBadge(w){
+  if(!w||w.wordType!=="Verb")return"";
+  const tap=`onclick="editPreps('${w.id}')" style="cursor:pointer;text-decoration:underline dotted;`;
+  if(!hasPrep(w))return` · <span ${tap}color:#F07A7A" title="Tap to add prepositions">needs prepositions</span>`;
+  if(w.prepCheck==="dict")return` · <span ${tap}color:#5FD3A0" title="Confirmed against the dictionary — tap to edit">✓ dictionary</span>`;
+  if(w.prepCheck==="user")return` · <span ${tap}color:#5FD3A0" title="You checked these — tap to edit">✓ checked</span>`;
+  return` · <span ${tap}color:#D9B45E" title="Not checked yet — tap to edit">⚠ unchecked</span>`;
+}
 // Status card (Settings) and nudge (Home).
 function prepCard(){
-  const verbs=uw.filter(w=>w&&w.wordType==="Verb");
-  const missing=verbsMissingPreps().length;
+  const verbs=allVerbs();
+  const missing=verbsMissingPreps().length,unchecked=verbsUnchecked().length;
+  const dictN=verbs.filter(w=>hasPrep(w)&&w.prepCheck==="dict").length;
+  const userN=verbs.filter(w=>hasPrep(w)&&w.prepCheck==="user").length;
   const hasBackup=Object.keys(gLS(prepBackupKey())||{}).length>0;
-  const p=prepRun;
+  const p=prepRun;const todo=missing+unchecked;
+  const row=(n,label,col)=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span style="color:#8DB5A5">${label}</span><span style="color:${col};font-weight:600">${n}</span></div>`;
   return`<div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:18px;margin-bottom:18px">
     <div style="font-size:11px;color:#8DB5A5;margin-bottom:8px;line-height:1.6">Every verb is saved with the preposition(s) it takes, after the plus sign:</div>
-    <div style="font-family:'Amiri',serif;direction:rtl;text-align:center;color:#F0D48A;font-size:20px;margin-bottom:8px;padding:8px 10px;background:rgba(0,0,0,.22);border:1px dashed rgba(217,180,94,.15);border-radius:8px">بَحَثَ · يَبْحَثُ · بَحْثٌ · + عَنْ</div>
-    <div style="font-size:11px;color:#8DB5A5;margin-bottom:12px;line-height:1.6">"<strong style="color:#EEE8D5">+ —</strong>" means the verb takes none. New verbs get theirs automatically; this adds them to the ones you already have.</div>
-    <div style="font-size:12px;color:#EEE8D5;margin-bottom:12px">${verbs.length} verb${verbs.length!==1?"s":""} in your deck — <strong style="color:${missing?"#D9B45E":"#5FD3A0"}">${missing?`${missing} still need prepositions`:"all have prepositions ✓"}</strong></div>
-    ${p.running?`<div style="margin-bottom:10px"><div class="pb"><div class="pf" style="width:${p.total?Math.round(p.done/p.total*100):0}%"></div></div><div style="font-size:11px;color:#8DB5A5;margin-top:6px">Working… ${p.done} of ${p.total}</div></div>`:""}
-    ${!p.running&&p.error?`<div style="font-size:11px;color:#F07A7A;margin-bottom:10px;line-height:1.5">Some verbs couldn't be done: ${p.error}</div>`:""}
+    <div style="font-family:'Amiri',serif;direction:rtl;text-align:center;color:#F0D48A;font-size:20px;margin-bottom:8px;padding:8px 10px;background:rgba(0,0,0,.22);border:1px dashed rgba(217,180,94,.15);border-radius:8px">بَحَثَ · يَبْحَثُ · بَحْثٌ · + عَنْ / فِي</div>
+    <div style="font-size:11px;color:#8DB5A5;margin-bottom:12px;line-height:1.6">"<strong style="color:#EEE8D5">+ —</strong>" means the verb takes none. Prepositions the AI suggests are <strong style="color:#EEE8D5">only a proposal</strong> — you review each one, with the dictionary's own wording beside it, before anything is saved.</div>
+    <div style="margin-bottom:12px;padding:6px 12px;background:rgba(255,255,255,.02);border:1px solid rgba(217,180,94,.12);border-radius:8px">
+      ${row(verbs.length,"Verbs in your deck","#EEE8D5")}
+      ${row(dictN,"✓ Confirmed by the dictionary","#5FD3A0")}
+      ${row(userN,"✓ Checked by you","#5FD3A0")}
+      ${row(unchecked,"⚠ Have prepositions, not checked","#D9B45E")}
+      ${row(missing,"Need prepositions","#F07A7A")}
+    </div>
+    ${p.running?`<div style="margin-bottom:10px"><div class="pb"><div class="pf" style="width:${p.total?Math.round(p.done/p.total*100):0}%"></div></div><div style="font-size:11px;color:#8DB5A5;margin-top:6px">${p.stage} ${p.done} of ${p.total}</div></div>`:""}
+    ${!p.running&&p.error?`<div style="font-size:11px;color:#D9B45E;margin-bottom:10px;line-height:1.5">${p.error}</div>`:""}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn1" onclick="runPrepBackfill()" ${(p.running||!missing)?"disabled":""} style="font-size:13px;padding:10px 20px">${p.running?"Working…":missing?`Add prepositions to ${missing} verb${missing!==1?"s":""}`:"Nothing to add"}</button>
-      ${hasBackup&&!p.running?`<button class="btn2" onclick="undoPrepBackfill()" style="font-size:12px;padding:10px 16px">↩ Undo last run</button>`:""}
-    </div></div>`;
+      <button class="btn1" onclick="startPrepReview()" ${(p.running||!todo)?"disabled":""} style="font-size:13px;padding:10px 20px">${p.running?"Working…":todo?`Review ${todo} verb${todo!==1?"s":""}`:"All checked ✓"}</button>
+      ${hasBackup&&!p.running?`<button class="btn2" onclick="undoPrepBackfill()" style="font-size:12px;padding:10px 16px">↩ Undo saved changes</button>`:""}
+    </div>
+    <div style="font-size:10px;color:#8DB5A5;margin-top:10px;line-height:1.5">Checked against English Wiktionary, a human-edited dictionary. It doesn't cover every verb — where it's silent the verb stays marked unchecked, so you know to confirm it elsewhere.</div></div>`;
 }
 function prepBanner(){
-  const missing=verbsMissingPreps().length;
-  if(!missing&&!prepRun.running)return"";
-  if(prepRun.running)return`<div style="padding:10px 14px;margin-bottom:12px;background:rgba(217,180,94,0.07);border:1px solid rgba(217,180,94,0.2);border-radius:10px;font-size:12px;color:#8DB5A5">Adding prepositions to your verbs… ${prepRun.done} of ${prepRun.total}</div>`;
+  const missing=verbsMissingPreps().length,unchecked=verbsUnchecked().length;
+  if(prepRun.running)return`<div style="padding:10px 14px;margin-bottom:12px;background:rgba(217,180,94,0.07);border:1px solid rgba(217,180,94,0.2);border-radius:10px;font-size:12px;color:#8DB5A5">${prepRun.stage} ${prepRun.done} of ${prepRun.total}</div>`;
+  if(!missing&&!unchecked)return"";
+  const msg=missing?`<strong style="color:#D9B45E">${missing}</strong> verb${missing!==1?"s":""} need${missing===1?"s":""} prepositions`+(unchecked?` · ${unchecked} unchecked`:""):`<strong style="color:#D9B45E">${unchecked}</strong> verb${unchecked!==1?"s":""} ${unchecked!==1?"have":"has"} prepositions nobody has checked`;
   return`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;margin-bottom:12px;background:rgba(217,180,94,0.07);border:1px solid rgba(217,180,94,0.2);border-radius:10px">
-    <div style="font-size:12px;color:#EEE8D5;line-height:1.4"><strong style="color:#D9B45E">${missing}</strong> verb${missing!==1?"s":""} still ${missing!==1?"need":"needs"} prepositions</div>
-    <button class="btn2" onclick="runPrepBackfill()" style="font-size:11px;padding:6px 12px;flex-shrink:0">Add them</button></div>`;
+    <div style="font-size:12px;color:#EEE8D5;line-height:1.4">${msg}</div>
+    <button class="btn2" onclick="startPrepReview()" style="font-size:11px;padding:6px 12px;flex-shrink:0">Review</button></div>`;
+}
+// The review screen.
+function rPrepReview(){
+  const r=prepReview;
+  if(!r)return`<div style="text-align:center;padding:50px 0;color:#8DB5A5;font-size:13px">${prepRun.running?`${prepRun.stage} ${prepRun.done} of ${prepRun.total}`:"Nothing to review."}</div>`;
+  const cnt=s=>r.items.filter(i=>s==="look"?(i.status==="conflict"||i.status==="partial"):i.status===s).length;
+  const tab=(f,label,col)=>{const on=r.filter===f;return`<button onclick="prepSetFilter('${f}')" style="padding:6px 11px;border-radius:20px;border:1px solid ${on?col:"rgba(217,180,94,.18)"};background:${on?"rgba(217,180,94,.12)":"transparent"};color:${on?col:"#8DB5A5"};font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap">${label} ${cnt(f)}</button>`;};
+  const list=prepFilterItems();const shown=list.slice(0,r.shown);
+  const sel=r.items.filter(i=>i.include).length;
+  const chip={confirmed:["✓ Dictionary agrees","#5FD3A0"],partial:["◐ Partly confirmed","#D9B45E"],conflict:["⚠ Dictionary differs","#F07A7A"],silent:["○ Not covered — unverified","#8DB5A5"],none:["No proposal","#8DB5A5"]};
+  const esc=s=>String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  const card=it=>{
+    const[c,col]=chip[it.status];
+    const dictPreps=it.dict&&it.dict.preps.length?it.dict.preps:[];
+    return`<div style="background:var(--panel);border:1px solid ${it.include?"rgba(95,211,160,.4)":"rgba(217,180,94,0.18)"};border-radius:12px;padding:12px 14px;margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
+        <input type="checkbox" ${it.include?"checked":""} onchange="prepToggle('${it.id}')" style="width:18px;height:18px;accent-color:#D9B45E;cursor:pointer;flex-shrink:0;margin-top:3px"/>
+        <div style="flex:1;min-width:0">
+          <div style="font-family:'Amiri',serif;direction:rtl;text-align:right;font-size:22px;color:#F0D48A;line-height:1.4">${it.head}</div>
+          <div style="font-size:12px;color:#EEE8D5;margin-top:2px">${esc(it.english)} <span style="color:#8DB5A5;font-size:10px">· ${it.dialect}${it.had?" · already has prepositions":""}</span></div>
+        </div>
+        <span style="font-size:10px;color:${col};border:1px solid ${col};border-radius:20px;padding:2px 9px;white-space:nowrap;flex-shrink:0">${c}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:11px;color:#8DB5A5;flex-shrink:0">Prepositions</span>
+        <input class="inp" value="${esc(it.edit)}" oninput="prepEdit('${it.id}',this.value)" placeholder="عَنْ / فِي  (— if none)" style="font-family:'Amiri',serif;font-size:19px;direction:rtl;text-align:right;padding:6px 10px"/>
+      </div>
+      <div style="font-size:11px;color:#8DB5A5;line-height:1.5;margin-bottom:6px">${esc(it.why)}${it.dict&&it.dict.error?` (${esc(it.dict.error)})`:""}</div>
+      ${it.dict&&it.dict.evidence.length?`<div style="margin-bottom:6px;padding:7px 10px;background:rgba(0,0,0,.2);border-left:2px solid ${col};border-radius:4px">${it.dict.evidence.map(l=>`<div style="font-size:11px;color:#EEE8D5;line-height:1.5;margin-bottom:2px">${esc(l)}</div>`).join("")}</div>`:""}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11px">
+        ${dictPreps.length?`<button onclick="prepUseDict('${it.id}')" style="background:none;border:1px solid rgba(217,180,94,.3);border-radius:6px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px;padding:3px 9px">Use the dictionary's: <span style="font-family:'Amiri',serif;font-size:14px">${dictPreps.join(" / ")}</span></button>`:""}
+        <a href="${wiktUrl(it.head)}" target="_blank" rel="noopener" style="color:#8DB5A5">Wiktionary ↗</a>
+        <a href="${almaanyUrl(it.head)}" target="_blank" rel="noopener" style="color:#8DB5A5">Almaany ↗</a>
+      </div></div>`;
+  };
+  return`<div style="font-size:18px;font-weight:600;color:#D9B45E;margin-bottom:4px">Review prepositions</div>
+  <div style="font-size:12px;color:#8DB5A5;margin-bottom:14px;line-height:1.6">Nothing is saved until you press Save. Tick the verbs you accept; edit any box that's wrong. <strong style="color:#EEE8D5">Green</strong> means a dictionary lists it. <strong style="color:#EEE8D5">Grey</strong> means the dictionary doesn't cover that verb — so the answer is only the AI's, and worth confirming in Hans Wehr or with a teacher before you rely on it.</div>
+  ${prepRun.error?`<div style="font-size:11px;color:#D9B45E;margin-bottom:10px">${prepRun.error}</div>`:""}
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+    ${tab("look","Needs a look","#F07A7A")}${tab("silent","Not covered","#8DB5A5")}${tab("none","No proposal","#8DB5A5")}${tab("confirmed","Agrees","#5FD3A0")}
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <button class="btn2" onclick="prepSelectConfirmed()" style="font-size:11px;padding:6px 12px">Tick all that agree</button>
+    <button class="btn2" onclick="prepSelectNone()" style="font-size:11px;padding:6px 12px">Untick all</button>
+  </div>
+  ${shown.length?shown.map(card).join(""):`<div style="text-align:center;color:#8DB5A5;padding:30px 0;font-size:13px">Nothing in this group.</div>`}
+  ${list.length>shown.length?`<button class="btn2" onclick="prepMore()" style="width:100%;margin-bottom:12px">Show ${Math.min(40,list.length-shown.length)} more</button>`:""}
+  <div style="position:sticky;bottom:10px;display:flex;gap:8px;padding:10px;background:rgba(4,20,15,.92);border:1px solid rgba(217,180,94,.25);border-radius:12px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)">
+    <button class="btn1" onclick="savePrepReview()" ${sel?"":"disabled"} style="flex:1;justify-content:center;font-size:13px;padding:11px 14px">Save ${sel} verb${sel!==1?"s":""}</button>
+    <button class="btn2" onclick="prepCancel()" style="font-size:12px;padding:11px 16px">Cancel</button>
+  </div>`;
 }
 
 // ── Darija → Latin script (Moroccan Arabizi) ──────────────────────
@@ -1385,7 +1643,7 @@ function R(){
     <div id="main"></div>
   </div>`;
   const m=document.getElementById("main");if(!m)return;
-  const map={home:rH,levels:rL,add:rA,apply:rApply,root:rRoot,import:rI,settings:rSettings,"review-setup":rRS,review:rRV,"release-prompt":rReleasePrompt,done:rD,"bonus-config":rBonusConfig,bonus:rBonus,"bonus-done":rBonusDone};
+  const map={home:rH,levels:rL,add:rA,apply:rApply,root:rRoot,import:rI,settings:rSettings,"review-setup":rRS,review:rRV,"release-prompt":rReleasePrompt,"prep-review":rPrepReview,done:rD,"bonus-config":rBonusConfig,bonus:rBonus,"bonus-done":rBonusDone};
   m.innerHTML=(map[view]||rH)();
   // Refresh sync dot after every render — error/offline states must persist across re-renders
   setSyncDot(syncing);
@@ -1619,7 +1877,7 @@ function rVault(tabs){
         <div style="${rowAr(w,19)}">${arT(w)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;color:#EEE8D5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.english}</div>
-          <div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${(w.example||"").trim()?` · <span style="color:#5FD3A0">has example</span>`:""}</div>
+          <div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${prepBadge(w)}${(w.example||"").trim()?` · <span style="color:#5FD3A0">has example</span>`:""}</div>
         </div>
         ${vaultSelectMode?"":`<div class="wr-act" style="display:flex;gap:2px;flex-shrink:0;align-items:center">
           <button onclick="toggleVaultPriority('${w.id}')" title="${w.priority?"Remove priority":"Mark priority"}" style="background:none;border:none;cursor:pointer;color:${w.priority?"#D9B45E":"rgba(141,181,165,.5)"};font-size:15px;padding:3px 4px">${w.priority?"★":"☆"}</button>
@@ -1642,7 +1900,7 @@ function rL(){
       const qDate=isQueue?queueDateKey(prog[w.id]?.queuedAt):"";
       const stars=al==="M"?bonusStars(prog[w.id]):0;
       const starStr=stars>0?` · <span style="color:#5FD3A0">${"★".repeat(stars)}</span>`:"";
-      const qBadge=isQueue?`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType} · queued ${queueDateLabel(qDate)}</div>`:`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${starStr}</div>`;
+      const qBadge=isQueue?`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${prepBadge(w)} · queued ${queueDateLabel(qDate)}</div>`:`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${prepBadge(w)}${starStr}</div>`;
       const sel=lvlSelected.has(w.id);
       return`<div class="wr${arLong(w)?" wr-long":""}" style="border:1px solid ${sel?"rgba(217,180,94,.45)":`rgba(${rgb(lv.c)},0.2)`};background:${sel?"rgba(217,180,94,.07)":""}">
       ${lvlSelectMode?`<input type="checkbox" ${sel?"checked":""} onchange="toggleLvlSelect('${w.id}')" style="width:16px;height:16px;accent-color:#D9B45E;cursor:pointer;flex-shrink:0"/>`:""}
@@ -2099,9 +2357,9 @@ function SA(aa){
   if(w.wordType==="Verb"&&!hasPrep(w)){
     const fp=(document.getElementById("fp")?.value||"").trim();
     if(fp){
-      const parts=/^[-—–]$|^none$/i.test(fp)?[]:fp.split(/[\/،,;]+/).map(s=>s.trim()).filter(Boolean);
-      const na=attachPreps(w.arabic,parts);
-      if(na)w.arabic=na;
+      const parts=parsePrepInput(fp);
+      const na=parts===null?null:attachPreps(w.arabic,parts);
+      if(na){w.arabic=na;w.prepCheck="user";} // you typed them yourself
     }
   }
   uw.push(w);saveUW();prog[w.id]={leitnerLevel:tl,nextReview:nrf(tl)||Date.now(),queuedAt:Date.now()};saveProgressToDB();
