@@ -283,7 +283,7 @@ async function fillExamples(words){
   const batch=need.slice(0,60); // one call; anything beyond waits for next time
   const prompt=`For each Arabic entry below, write ONE short natural example sentence in Arabic with full diacritics, followed by its English translation in parentheses.
 
-Keep sentences short — under 12 words. Use the dialect given for each entry. For entries showing several forms separated by " · ", use whichever form reads most naturally.
+Keep sentences short — under 12 words. Use the dialect given for each entry. For entries showing several forms separated by " · ", use whichever form reads most naturally. If an entry has a last segment starting with "+", that is the preposition the verb governs ("+ —" means it takes none): the sentence must use the verb together with that preposition.
 
 Entries:
 ${batch.map((w,i)=>`${i+1}. ${w.arabic} — ${w.english} [${w.dialect||"MSA"}]`).join("\n")}
@@ -657,6 +657,10 @@ let rq=[],ri=0,rd="en-ar",rr=[],fl=false;
 // that step's snapshot and position within it. pendingRelease holds the
 // Yes/Skip release prompt (L2A->L2B or L5A->L5B) between steps.
 let sessionActive=false,sessionSteps=[],stepIdx=0,pendingRelease=null;
+// Session size is a TOTAL for the session (null = no cap). It's spent on one
+// level at a time, highest first; stepCutShort means the cap ended the current
+// level before it was finished, so the session stops there.
+let sessionRemaining=null,stepCutShort=false,stepRanBefore=false;
 let ir=null,syncing=false,pendingSync=null,pendingResync=false;
 let importImages=[]; // {dataUrl, base64, mediaType, name} — screenshots pending OCR extraction
 const MAX_IMPORT_IMAGES=5;
@@ -1007,6 +1011,182 @@ function partitionNewCards(list){
   return{fresh,skipped};
 }
 
+// ── Verb prepositions ──────────────────────────────────────────────
+// Arabic verbs are learned together with the prepositions they govern
+// (بَحَثَ عَنْ "search for", ذَهَبَ إِلَى "go to"). A verb card's arabic field is
+// "past · present · masdar"; the prepositions ride along as ONE more trailing
+// segment: "… · + عَنْ / فِي", or "… · + —" when the verb takes none. Keeping
+// it a separate segment (never glued onto the headword) means duplicate
+// detection, which keys on the headword, is completely unaffected.
+function isPrepSeg(s){return/^\+\s*\S/.test((s||"").trim());}
+function verbSegs(arabic){return(arabic||"").split("·").map(s=>s.trim()).filter(Boolean);}
+function verbBase(arabic){return verbSegs(arabic).filter(s=>!isPrepSeg(s)).join(" · ");}
+function hasPrep(w){return verbSegs(w&&w.arabic).some(isPrepSeg);}
+// Keep only real Arabic-script prepositions from AI output; dedupe; cap at 4.
+function cleanPreps(list){
+  const out=[];
+  (Array.isArray(list)?list:[]).forEach(p=>{
+    const s=String(p==null?"":p).replace(/^\+\s*/,"").trim();
+    if(s&&/[ء-ي]/.test(s)&&s.length<=14&&!out.includes(s))out.push(s);
+  });
+  return out.slice(0,4);
+}
+// New arabic string with the prepositions attached, or null if the AI's answer
+// wasn't usable (so the caller leaves the card alone rather than guessing).
+// An explicit empty array is a real answer: the verb takes no preposition.
+function attachPreps(arabic,raw){
+  if(!Array.isArray(raw)||!verbBase(arabic))return null;
+  const list=cleanPreps(raw);
+  if(raw.length&&!list.length)return null;
+  return verbBase(arabic)+" · + "+(list.length?list.join(" / "):"—");
+}
+// For freshly generated cards: fold each verb's "prepositions" array into its
+// arabic field, and strip the helper field so it never reaches storage.
+function applyVerbPreps(list){
+  (list||[]).forEach(c=>{
+    if(!c)return;
+    if(c.wordType==="Verb"&&c.arabic){const na=attachPreps(c.arabic,c.prepositions);if(na)c.arabic=na;}
+    delete c.prepositions;
+  });
+  return list;
+}
+// Arabic column style for the word lists. Short words keep the old fixed
+// column; long entries (verbs with their prepositions) wrap and share the row
+// with the English meaning instead of crowding it out on a phone.
+function arLen(w){return[...(arT(w)||"")].filter(c=>!/[ً-ٰٟ]/.test(c)).length;}
+function arLong(w){return arLen(w)>14;}
+function rowAr(w,size){
+  const n=arLen(w);
+  const base=`${arS(w)}${arAlign(w)}color:#F0D48A;`;
+  if(n<=14)return base+`font-size:${size}px;flex:0 0 auto;min-width:65px;`;
+  return base+`font-size:${n>24?16:size-2}px;line-height:1.55;flex:1.2 1 0;min-width:0;`;
+}
+// Shared prompt wording so every generator asks for the same thing.
+const VERB_PREP_RULES=`For every VERB also return "prepositions": a JSON array of the Arabic preposition(s) that verb normally governs, fully vowelled, most common first, at most 4 (for example ["عَنْ"] or ["إِلَى","فِي"]). Use the prepositions that fit the word's dialect. If the verb takes its object directly and governs no preposition, return an empty array []. Do NOT put the preposition inside the "arabic" field — the app attaches it. In "english", write the verb the way it is used with that preposition (e.g. "to search for", "to go to"); if different prepositions change the meaning, give each, e.g. "to search for (عَنْ); to look into (فِي)". For non-verbs omit "prepositions".`;
+
+// Ask the AI which preposition(s) each verb governs. Returns an array aligned
+// with `words` — each entry is an array of prepositions ([] = takes none) or
+// null if that verb didn't get a usable answer.
+async function fetchPrepsFor(words){
+  const apiKey=(gLS(`mufradat-apikey-${CU.username}`)||'').replace(/^["']|["']$/g,'');
+  if(!apiKey)throw new Error("No API key — add it in Settings");
+  const prompt=`You are an expert Arabic linguist. For each numbered Arabic verb below, give the preposition(s) it normally governs.
+
+Rules:
+- "prepositions" is a JSON array of Arabic prepositions, fully vowelled, most common first, at most 4 (for example ["عَنْ"] or ["إِلَى","فِي"]).
+- Use the prepositions that fit the dialect shown in brackets.
+- Judge by the first form (the past tense) of each entry.
+- If the verb takes its object directly and governs no preposition, return an empty array [].
+
+Verbs:
+${words.map((w,i)=>`${i+1}. ${verbBase(w.arabic)} — ${w.english} [${w.dialect||"MSA"}]`).join("\n")}
+
+Return ONLY a valid JSON array with one object per verb, in the same order, no markdown and no commentary:
+[{"n":1,"prepositions":["..."]}, ...]`;
+  const res=await fetch("https://tiny-sound-c8ff.jmorgansmith03.workers.dev",{method:"POST",
+    headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
+    body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:4000,messages:[{role:"user",content:prompt}]})});
+  const data=await res.json();
+  if(data.error)throw new Error(data.error.message||"API error");
+  let raw=(data.content||[]).map(c=>c.text||"").join("").replace(/```json|```/g,"").trim();
+  const a=raw.indexOf("["),b=raw.lastIndexOf("]");
+  if(a===-1||b===-1)throw new Error("Unreadable answer");
+  const arr=JSON.parse(raw.slice(a,b+1));
+  const out=words.map(()=>null);
+  (Array.isArray(arr)?arr:[]).forEach(o=>{
+    const i=(o&&Number(o.n))-1;
+    if(i>=0&&i<words.length&&Array.isArray(o.prepositions))out[i]=o.prepositions;
+  });
+  return out;
+}
+// Every verb in your deck — every level and the Vault — that doesn't have its
+// prepositions yet.
+function verbsMissingPreps(){return uw.filter(w=>w&&w.wordType==="Verb"&&w.arabic&&!hasPrep(w));}
+function prepBackupKey(){return"mufradat-prep-backup-"+(CU?CU.username:"");}
+let prepRun={running:false,done:0,total:0,ok:0,failed:0,error:""};
+async function runPrepBackfill(){
+  if(prepRun.running)return;
+  if(!navigator.onLine){toast("This needs a connection","#D9B45E");return;}
+  const todo=verbsMissingPreps();
+  if(!todo.length){toast("Every verb already has its prepositions ✓");return;}
+  if(!(gLS(`mufradat-apikey-${CU.username}`)||"")){toast("No API key — add it in Settings","#F07A7A");V("settings");return;}
+  if(!confirm(`Attach prepositions to ${todo.length} verb${todo.length!==1?"s":""}?\n\nThis adds the preposition(s) each verb takes to its card, in every level and the Vault. Nothing else changes, and you can undo it from Settings.`))return;
+  // Keep the original text so the whole run can be undone.
+  const backup=gLS(prepBackupKey())||{};
+  prepRun={running:true,done:0,total:todo.length,ok:0,failed:0,error:""};R();
+  const BATCH=25;
+  for(let i=0;i<todo.length;i+=BATCH){
+    const batch=todo.slice(i,i+BATCH);
+    try{
+      const results=await fetchPrepsFor(batch);
+      batch.forEach((w,k)=>{
+        const na=attachPreps(w.arabic,results[k]);
+        if(na){if(!(w.id in backup))backup[w.id]=w.arabic;w.arabic=na;prepRun.ok++;}
+        else prepRun.failed++;
+      });
+      saveUW();sLS(prepBackupKey(),backup);
+      await saveProgressToDB();
+    }catch(e){
+      prepRun.failed+=batch.length;prepRun.error=e.message||String(e);
+      console.warn("[prepositions] batch failed:",e);
+    }
+    prepRun.done=Math.min(i+BATCH,todo.length);R();
+  }
+  prepRun.running=false;R();
+  const msg=prepRun.failed?`${prepRun.ok} verbs updated · ${prepRun.failed} couldn't be done — run it again to retry`:`Prepositions added to ${prepRun.ok} verb${prepRun.ok!==1?"s":""} ✓`;
+  toast(msg,prepRun.failed?"#D9B45E":"#5FD3A0");
+}
+// Put the verbs from the last run back exactly as they were.
+async function undoPrepBackfill(){
+  const backup=gLS(prepBackupKey())||{};
+  const ids=Object.keys(backup);
+  if(!ids.length){toast("Nothing to undo","#D9B45E");return;}
+  if(!confirm(`Put ${ids.length} verb${ids.length!==1?"s":""} back the way they were, without their prepositions?`))return;
+  let n=0;
+  ids.forEach(id=>{const w=uw.find(x=>x.id===id);if(w&&hasPrep(w)){w.arabic=backup[id];n++;}});
+  sLS(prepBackupKey(),{});
+  saveUW();await saveProgressToDB();
+  toast(`${n} verb${n!==1?"s":""} restored`);R();
+}
+// Look up prepositions for just-added verbs that didn't come with them
+// (typed by hand, or the AI skipped one). Quiet: it never blocks the add.
+async function attachPrepsInBackground(ids){
+  const ws=(ids||[]).map(id=>uw.find(w=>w.id===id)).filter(w=>w&&w.wordType==="Verb"&&!hasPrep(w));
+  if(!ws.length||!navigator.onLine)return;
+  try{
+    const results=await fetchPrepsFor(ws);
+    let n=0;
+    ws.forEach((w,i)=>{const na=attachPreps(w.arabic,results[i]);if(na){w.arabic=na;n++;}});
+    if(n){saveUW();await saveProgressToDB();R();}
+  }catch(e){console.warn("[prepositions] background lookup skipped:",e.message||e);}
+}
+// Status card (Settings) and nudge (Home).
+function prepCard(){
+  const verbs=uw.filter(w=>w&&w.wordType==="Verb");
+  const missing=verbsMissingPreps().length;
+  const hasBackup=Object.keys(gLS(prepBackupKey())||{}).length>0;
+  const p=prepRun;
+  return`<div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:18px;margin-bottom:18px">
+    <div style="font-size:11px;color:#8DB5A5;margin-bottom:8px;line-height:1.6">Every verb is saved with the preposition(s) it takes, after the plus sign:</div>
+    <div style="font-family:'Amiri',serif;direction:rtl;text-align:center;color:#F0D48A;font-size:20px;margin-bottom:8px;padding:8px 10px;background:rgba(0,0,0,.22);border:1px dashed rgba(217,180,94,.15);border-radius:8px">بَحَثَ · يَبْحَثُ · بَحْثٌ · + عَنْ</div>
+    <div style="font-size:11px;color:#8DB5A5;margin-bottom:12px;line-height:1.6">"<strong style="color:#EEE8D5">+ —</strong>" means the verb takes none. New verbs get theirs automatically; this adds them to the ones you already have.</div>
+    <div style="font-size:12px;color:#EEE8D5;margin-bottom:12px">${verbs.length} verb${verbs.length!==1?"s":""} in your deck — <strong style="color:${missing?"#D9B45E":"#5FD3A0"}">${missing?`${missing} still need prepositions`:"all have prepositions ✓"}</strong></div>
+    ${p.running?`<div style="margin-bottom:10px"><div class="pb"><div class="pf" style="width:${p.total?Math.round(p.done/p.total*100):0}%"></div></div><div style="font-size:11px;color:#8DB5A5;margin-top:6px">Working… ${p.done} of ${p.total}</div></div>`:""}
+    ${!p.running&&p.error?`<div style="font-size:11px;color:#F07A7A;margin-bottom:10px;line-height:1.5">Some verbs couldn't be done: ${p.error}</div>`:""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn1" onclick="runPrepBackfill()" ${(p.running||!missing)?"disabled":""} style="font-size:13px;padding:10px 20px">${p.running?"Working…":missing?`Add prepositions to ${missing} verb${missing!==1?"s":""}`:"Nothing to add"}</button>
+      ${hasBackup&&!p.running?`<button class="btn2" onclick="undoPrepBackfill()" style="font-size:12px;padding:10px 16px">↩ Undo last run</button>`:""}
+    </div></div>`;
+}
+function prepBanner(){
+  const missing=verbsMissingPreps().length;
+  if(!missing&&!prepRun.running)return"";
+  if(prepRun.running)return`<div style="padding:10px 14px;margin-bottom:12px;background:rgba(217,180,94,0.07);border:1px solid rgba(217,180,94,0.2);border-radius:10px;font-size:12px;color:#8DB5A5">Adding prepositions to your verbs… ${prepRun.done} of ${prepRun.total}</div>`;
+  return`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;margin-bottom:12px;background:rgba(217,180,94,0.07);border:1px solid rgba(217,180,94,0.2);border-radius:10px">
+    <div style="font-size:12px;color:#EEE8D5;line-height:1.4"><strong style="color:#D9B45E">${missing}</strong> verb${missing!==1?"s":""} still ${missing!==1?"need":"needs"} prepositions</div>
+    <button class="btn2" onclick="runPrepBackfill()" style="font-size:11px;padding:6px 12px;flex-shrink:0">Add them</button></div>`;
+}
+
 // ── Darija → Latin script (Moroccan Arabizi) ──────────────────────
 // Display-layer only. The Arabic stays exactly as stored; nothing is rewritten
 // in the database, so this is fully reversible from the Settings toggle.
@@ -1338,6 +1518,7 @@ function rH(){
   const masteredCount=words.filter(w=>w.leitnerLevel==="M").length;
   return`<div style="font-size:11px;color:#8DB5A5;margin-bottom:14px;text-align:center">${DN[today.getDay()]}, ${today.toLocaleDateString("en",{month:"long",day:"numeric",year:"numeric"})} · <span style="color:#D9B45E">@${CU.username}</span></div>
   ${tb}
+  ${prepBanner()}
   <div style="margin-bottom:12px"><div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Dialect Filter</div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">${dp}</div></div>
   ${sh("Review Levels")}
@@ -1433,14 +1614,14 @@ function rVault(tabs){
   ${shown.length===0?`<div style="text-align:center;color:#8DB5A5;padding:40px 0;font-size:13px">Nothing matches that filter.</div>`:
     shown.map(w=>{
       const sel=vaultSelected.has(w.id);
-      return`<div class="wr" style="border:1px solid ${sel?"rgba(217,180,94,.45)":`rgba(${rgb(lv.c)},0.18)`};background:${sel?"rgba(217,180,94,.07)":""}">
+      return`<div class="wr${arLong(w)?" wr-long":""}" style="border:1px solid ${sel?"rgba(217,180,94,.45)":`rgba(${rgb(lv.c)},0.18)`};background:${sel?"rgba(217,180,94,.07)":""}">
         ${vaultSelectMode?`<input type="checkbox" ${sel?"checked":""} onchange="toggleVaultSelect('${w.id}')" style="width:16px;height:16px;accent-color:#D9B45E;cursor:pointer;flex-shrink:0"/>`:""}
-        <div style="${arS(w)}${arAlign(w)}font-size:19px;flex:0 0 auto;min-width:65px;color:#F0D48A">${arT(w)}</div>
+        <div style="${rowAr(w,19)}">${arT(w)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;color:#EEE8D5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.english}</div>
           <div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${(w.example||"").trim()?` · <span style="color:#5FD3A0">has example</span>`:""}</div>
         </div>
-        ${vaultSelectMode?"":`<div style="display:flex;gap:2px;flex-shrink:0;align-items:center">
+        ${vaultSelectMode?"":`<div class="wr-act" style="display:flex;gap:2px;flex-shrink:0;align-items:center">
           <button onclick="toggleVaultPriority('${w.id}')" title="${w.priority?"Remove priority":"Mark priority"}" style="background:none;border:none;cursor:pointer;color:${w.priority?"#D9B45E":"rgba(141,181,165,.5)"};font-size:15px;padding:3px 4px">${w.priority?"★":"☆"}</button>
           <button onclick="promoteFromVault(['${w.id}'],'L1Q')" title="Send to L1 Queue" style="background:none;border:none;cursor:pointer;color:#D9B45E;font-size:15px;padding:3px 6px">↑</button>
           <button onclick="DW('${w.id}')" style="background:none;border:none;cursor:pointer;color:rgba(240,122,122,.45);font-size:16px;padding:3px 5px">×</button>
@@ -1463,14 +1644,14 @@ function rL(){
       const starStr=stars>0?` · <span style="color:#5FD3A0">${"★".repeat(stars)}</span>`:"";
       const qBadge=isQueue?`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType} · queued ${queueDateLabel(qDate)}</div>`:`<div style="font-size:10px;color:#8DB5A5;margin-top:2px">${w.dialect} · ${w.wordType}${starStr}</div>`;
       const sel=lvlSelected.has(w.id);
-      return`<div class="wr" style="border:1px solid ${sel?"rgba(217,180,94,.45)":`rgba(${rgb(lv.c)},0.2)`};background:${sel?"rgba(217,180,94,.07)":""}">
+      return`<div class="wr${arLong(w)?" wr-long":""}" style="border:1px solid ${sel?"rgba(217,180,94,.45)":`rgba(${rgb(lv.c)},0.2)`};background:${sel?"rgba(217,180,94,.07)":""}">
       ${lvlSelectMode?`<input type="checkbox" ${sel?"checked":""} onchange="toggleLvlSelect('${w.id}')" style="width:16px;height:16px;accent-color:#D9B45E;cursor:pointer;flex-shrink:0"/>`:""}
-      <div style="${arS(w)}${arAlign(w)}font-size:20px;flex:0 0 auto;min-width:65px;color:#F0D48A">${arT(w)}</div>
+      <div style="${rowAr(w,20)}">${arT(w)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;color:#EEE8D5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.english}</div>
         ${qBadge}
       </div>
-      ${lvlSelectMode?"":`<div style="display:flex;gap:1px;flex-shrink:0">
+      ${lvlSelectMode?"":`<div class="wr-act" style="display:flex;gap:1px;flex-shrink:0">
         <button onclick="MWto('${w.id}','V')" title="Send to Vault" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">🗄</button>
         <select onchange="MWto('${w.id}',this.value)" title="Move to any box" style="background:var(--panel);border:1px solid rgba(217,180,94,0.25);border-radius:6px;color:#8DB5A5;font-family:inherit;font-size:11px;padding:2px 3px;max-width:74px;cursor:pointer"><option value="">Move…</option>${LV.filter(l=>l.id!==al).map(l=>`<option value="${l.id}">${l.l}</option>`).join("")}</select>
         ${li>0?`<button onclick="MW('${w.id}',-1)" style="background:none;border:none;cursor:pointer;color:#8DB5A5;font-size:14px;padding:3px 5px">↓</button>`:""}
@@ -1619,6 +1800,9 @@ function rASingle(){
       <div id="een" style="color:#F07A7A;font-size:11px;margin-top:4px;display:none">Required</div></div>
     <div style="margin-bottom:16px"><label class="lbl">Example Sentence</label>
       <input id="fe" class="inp" placeholder="Usage in context…"/></div>
+    <div style="margin-bottom:16px"><label class="lbl">Prepositions (verbs)</label>
+      <input id="fp" class="inp" style="font-family:'Amiri',serif;font-size:20px;direction:rtl;text-align:right" placeholder="عَنْ / فِي — leave blank and they're looked up for you"/>
+      <div style="font-size:10px;color:#8DB5A5;margin-top:4px;line-height:1.5">For verbs: the preposition(s) it takes, separated by / (type — if it takes none). Every verb is saved with them.</div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
       <div><label class="lbl">Word Type</label><select id="ft" class="inp" style="cursor:pointer;font-size:13px;padding:10px 12px">${so(WT,"Noun")}</select></div>
       <div><label class="lbl">Dialect</label><select id="fd" class="inp" style="cursor:pointer;font-size:13px;padding:10px 12px">${so(DL,"MSA")}</select></div>
@@ -1798,7 +1982,8 @@ The user may prefix lines with a dialect override like "these are Darija:" — r
 
 Rules:
 - For NOUNS: include the singular with full diacritics, then " · " then the plural with full diacritics in the arabic field. English should be "singular meaning, plural meaning" if they differ, otherwise just the meaning.
-- For VERBS: include past tense (ماضي) · present tense (مضارع) · masdar (مصدر) all with full diacritics separated by " · " in the arabic field. English should be "to [verb]".
+- For VERBS: include past tense (ماضي) · present tense (مضارع) · masdar (مصدر) all with full diacritics separated by " · " in the arabic field. English should be "to [verb]" (with its preposition, see below).
+- ${VERB_PREP_RULES}
 - For all other word types: just the word with full diacritics.
 - Always include full tashkeel (diacritics) on ALL Arabic text.
 - Do NOT write example sentences. Leave "example" as an empty string. Example
@@ -1816,7 +2001,8 @@ Return ONLY a valid JSON array, no markdown, no explanation. Each object:
   "english": "...",
   "example": "",
   "wordType": "...",
-  "dialect": "..."
+  "dialect": "...",
+  "prepositions": ["...only for verbs"]
 }`;
 
   try{
@@ -1829,7 +2015,7 @@ Return ONLY a valid JSON array, no markdown, no explanation. Each object:
     const raw=data.content?.map(c=>c.text||"").join("")||"";
     const parsed=JSON.parse(raw.replace(/```json|```/g,"").trim());
     bulkSource="add";
-    const {fresh,skipped}=partitionNewCards(parsed);
+    const {fresh,skipped}=partitionNewCards(applyVerbPreps(parsed));
     bulkCards=fresh.map(c=>({...c,id:uid(),leitnerLevel:"V",nextReview:nrf("V")||Date.now(),createdAt:Date.now()}));
     bulkSkipped=skipped;
     if(skipped.length&&!fresh.length)toast(`All ${parsed.length} words are already in your deck`,"#D9B45E");
@@ -1864,6 +2050,7 @@ async function confirmBulkCards(){
   uw.push(...toAdd);saveUW();
   toAdd.forEach(w=>{prog[w.id]={leitnerLevel:tl,nextReview:nrf(tl)||Date.now(),queuedAt:Date.now()};});
   saveProgressToDB();
+  attachPrepsInBackground(toAdd.map(w=>w.id)); // any verb the AI skipped a preposition on
   const lv=LV.find(l=>l.id===tl);
   const tlName=lv?lv.l:tl;
   let msg,color;
@@ -1902,11 +2089,23 @@ function SA(aa){
   const w={id:uid(),arabic:ar.trim(),english:en.trim(),example:document.getElementById("fe")?.value||"",
     wordType:document.getElementById("ft")?.value||"Noun",dialect:document.getElementById("fd")?.value||"MSA",
     leitnerLevel:tl,nextReview:nrf(tl)||Date.now(),createdAt:Date.now()};
-  // Check for duplicate (tashkeel-insensitive)
-  const wNorm=normArabic(w.arabic);
-  const dupCheck=bw().find(x=>normArabic(x.arabic)===wNorm);
+  // Check for duplicate (tashkeel-insensitive). The preposition segment is
+  // ignored, so "كَتَبَ" matches a saved "كَتَبَ · … · + إِلَى".
+  const wNorm=normArabic(verbBase(w.arabic)||w.arabic);
+  const dupCheck=bw().find(x=>normArabic(verbBase(x.arabic)||x.arabic)===wNorm);
   if(dupCheck){toast(`Already in ${lvi(dupCheck.leitnerLevel).l}`,"#D9B45E");return;}
+  // Verbs carry their prepositions. Use what was typed; otherwise look them up
+  // in the background right after saving.
+  if(w.wordType==="Verb"&&!hasPrep(w)){
+    const fp=(document.getElementById("fp")?.value||"").trim();
+    if(fp){
+      const parts=/^[-—–]$|^none$/i.test(fp)?[]:fp.split(/[\/،,;]+/).map(s=>s.trim()).filter(Boolean);
+      const na=attachPreps(w.arabic,parts);
+      if(na)w.arabic=na;
+    }
+  }
   uw.push(w);saveUW();prog[w.id]={leitnerLevel:tl,nextReview:nrf(tl)||Date.now(),queuedAt:Date.now()};saveProgressToDB();
+  attachPrepsInBackground([w.id]);
   const lv=LV.find(l=>l.id===tl);
   toast(`Word added to ${lv?lv.l:tl} ✓`);
   if(aa)R();else V("home");
@@ -1957,7 +2156,8 @@ function rRS(){
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${dialectsHere.map(d=>pill(d,df===d,`setSessionDialect('${d}')`)).join("")}</div>
     <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Word Type</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${typesHere.map(t=>pill(t,wtf===t,`setSessionWordType('${t}')`)).join("")}</div>
-    ${sh("Size Per Step")}
+    ${sh("Session Size")}
+    <div style="font-size:11px;color:#8DB5A5;margin:-4px 0 10px;line-height:1.5">${budget===null?"Review everything in the selected levels.":`Up to ${budget} cards in total, highest level first. It stays on a level until that level is finished, then moves down — and if the size runs out mid-level, your next session picks up right there.`}</div>
     <div style="display:flex;gap:6px;margin-bottom:10px">
       ${SESSION_SIZES.map(n=>chip(n,n)).join("")}${chip("All",null)}
     </div>
@@ -1972,10 +2172,10 @@ function rRS(){
           <div style="font-size:12px;color:#EEE8D5">Prioritize verbs &amp; phrases</div>
           <div style="font-size:10px;color:#8DB5A5;margin-top:2px;line-height:1.5">${
             budget===null
-              ? "No effect while reviewing everything — pick a size to use it. Applies per step, e.g. \"40\" means up to 40 per level, not 40 total."
+              ? "No effect while reviewing everything — pick a size to use it."
               : prio
-                ? `Verbs 3&times; and phrases 2&times; more likely to be drawn within each step. A share of each step is held for words that have sat unreviewed the longest.`
-                : "Off — each step fills oldest-waiting first instead."
+                ? `When a level has more words than your session size, verbs are 3&times; and phrases 2&times; more likely to be drawn, and a share goes to words that have sat unreviewed the longest.`
+                : "Off — when a level has more words than your session size, the oldest-waiting come first."
           }</div>
         </div>
       </label>
@@ -2012,16 +2212,22 @@ function startSession(d){
     toast(done?`All caught up — the ${done} word${done!==1?"s":""} in these levels are done for today`:"Nothing to review in the selected levels","#D9B45E");
     return;
   }
+  const budget=sessionBudget();
+  sessionRemaining=(budget&&budget>0)?budget:null;stepCutShort=false;
   rd=d;stepIdx=0;rr=[];fl=false;pendingRelease=null;sessionActive=true;
   setupStep();
 }
 function setupStep(){
   if(stepIdx>=sessionSteps.length)return endSession();
   const level=sessionSteps[stepIdx];
+  stepRanBefore=stepRanToday(level); // had this level already been worked on earlier today?
   let pool=bw().filter(w=>w.leitnerLevel===level&&sessionMatch(w));
-  const budget=sessionBudget();
-  if(budget&&pool.length>budget){
-    const{picked}=buildSession(pool,budget,prioritizeTypes());
+  // Spend what's left of the session size on THIS level. If the level has more
+  // words than that, the cap ends the session here (stepCutShort) rather than
+  // sliding down to the next level and leaving this one half-done.
+  stepCutShort=sessionRemaining!==null&&pool.length>sessionRemaining;
+  if(stepCutShort){
+    const{picked}=buildSession(pool,sessionRemaining,prioritizeTypes());
     pool=picked;
   }
   rq=pool.slice().sort(byOrder); // oldest-waiting first
@@ -2038,14 +2244,26 @@ function releaseAll(from,to){
 async function finishStep(){
   const level=sessionSteps[stepIdx];
   markStepRan(level); // this box has run today — releases into it now wait until tomorrow
+  // The session size ended this level before it was finished. Stay on it: no
+  // release prompt (it would refill a level you haven't completed) and no
+  // sliding down to the next level. The next session resumes this same level.
+  if(stepCutShort){
+    await saveProgressToDB();
+    return endSession();
+  }
   if(level==="L1"){
     // Always last. L1Q no longer clears itself — release it by hand from the
     // Levels tab whenever you're ready (Move… dropdown or "Release to Level 1").
     await saveProgressToDB();
     return endSession();
   }
-  // L3Q and L4Q no longer clear themselves either — same manual release.
-  if(level==="L2B"){
+  // A release prompt only appears once the WHOLE box is done for today — not
+  // after a filtered drill or a partial pass, which would refill a half-done level.
+  // (L3Q and L4Q no longer clear themselves — same manual release.)
+  // …and not again in a later session the same day when there was nothing left
+  // to do in the level (it was already finished and asked about earlier).
+  const boxDone=bw().filter(w=>w.leitnerLevel===level&&!heldToday(w)).length===0&&!(rq.length===0&&stepRanBefore);
+  if(boxDone&&level==="L2B"){
     const waiting=bw().filter(w=>w.leitnerLevel==="L2A");
     if(waiting.length){
       pendingRelease={from:"L2A",to:"L2B"};
@@ -2054,7 +2272,7 @@ async function finishStep(){
       return;
     }
   }
-  if(level==="L5B"){
+  if(boxDone&&level==="L5B"){
     const waiting=bw().filter(w=>w.leitnerLevel==="L5A");
     if(waiting.length){
       pendingRelease={from:"L5A",to:"L5B"};
@@ -2063,8 +2281,13 @@ async function finishStep(){
       return;
     }
   }
+  await advanceStep();
+}
+// Move down to the next level — unless today's session size is already spent.
+async function advanceStep(){
   await saveProgressToDB();
   stepIdx++;
+  if(sessionRemaining!==null&&sessionRemaining<=0)return endSession();
   setupStep();
 }
 async function answerRelease(yes){
@@ -2076,9 +2299,7 @@ async function answerRelease(yes){
     holdMoved(ids,to); // promoted words wait for the next session, not "still due" in this one
   }
   pendingRelease=null;
-  await saveProgressToDB();
-  stepIdx++;
-  setupStep();
+  await advanceStep();
 }
 function endSession(){
   sessionActive=false;
@@ -2105,7 +2326,11 @@ function rRV(){
   const iae=rd==="ar-en",ft=iae?arT(card):card.english,bt=iae?card.english:arT(card);
   const pct=ri/rq.length*100,lv=lvi(card.leitnerLevel);
   const ad=wrongDest(card.leitnerLevel),gd=correctDest(card.leitnerLevel);
-  const arStyle=`${arS(card)}font-size:${isLatin(card)?38:50}px;text-align:center;line-height:1.5;color:#F0D48A`;
+  // Verbs now carry their prepositions too, so the Arabic line can get long —
+  // step the size down with length (letters only, diacritics don't take room).
+  const alen=[...(arT(card)||"")].filter(c=>!/[ً-ٰٟ]/.test(c)).length;
+  const arSize=isLatin(card)?38:(alen>38?28:alen>28?34:alen>20?40:50);
+  const arStyle=`${arS(card)}font-size:${arSize}px;text-align:center;line-height:1.5;color:#F0D48A`;
   const btns=fl?`<div style="font-size:11px;color:#8DB5A5;text-align:center;margin-bottom:8px;text-shadow:0 1px 8px #000">Currently <span style="color:${lv.c};font-weight:600">${lv.l}</span></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
       <button class="rb glass bad" onclick="RC('again')"><div>Again <span class="hint-key" style="opacity:.5;font-weight:400">[J]</span></div><div style="font-size:10px;opacity:.65;margin-top:2px;font-weight:400">→ ${lvi(ad).l}</div></button>
@@ -2175,6 +2400,8 @@ async function RC(a){
     prog[card.id]={...(prog[card.id]||{}),leitnerLevel:correctDest(level),nextReview:nowTs,queuedAt:nowTs,doneDay:today};
   }
   rr.push(a);
+  if(sessionRemaining!==null)sessionRemaining=Math.max(0,sessionRemaining-1); // spend one of today's session size
+  markStepRan(level); // this level has started today — releases into it now wait until tomorrow
   scheduleSync(); // save after every card so progress is never lost
   if(isl)await finishStep();
   else{ri++;fl=false;R();}
@@ -2444,7 +2671,9 @@ async function RI(){
 
   const schema=`Return ONLY a valid JSON array, no markdown fences and no commentary. Each object: arabic, english, example (string or ""), wordType (Noun/Verb/Adjective/Adverb/Phrase/Preposition/Conjunction/Other), dialect (MSA/Darija/Shaami/Egyptian/Gulf/Other).
 
-For nouns include the plural as "singular · plural" in the arabic field when you know it. For verbs use "past · present · masdar". Include full diacritics (tashkeel) on every Arabic word. Leave "example" as an empty string — example sentences are added later, only for words that enter active review.`;
+For nouns include the plural as "singular · plural" in the arabic field when you know it. For verbs use "past · present · masdar". Include full diacritics (tashkeel) on every Arabic word. Leave "example" as an empty string — example sentences are added later, only for words that enter active review.
+
+${VERB_PREP_RULES}`;
 
   let content;
   if(hasImages){
@@ -2459,7 +2688,7 @@ For nouns include the plural as "singular · plural" in the arabic field when yo
   try{
     const res=await fetch("https://tiny-sound-c8ff.jmorgansmith03.workers.dev",{method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
-      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:hasImages?4000:1500,
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:hasImages?6000:3000, // each verb now also carries its prepositions
         messages:[{role:"user",content}]})});
     const data=await res.json();
     if(data.error){toast(data.error.message||"API error","#F07A7A");ir=null;}
@@ -2469,7 +2698,7 @@ For nouns include the plural as "singular · plural" in the arabic field when yo
       const parsed=JSON.parse(cleaned);
       const list=Array.isArray(parsed)?parsed:[];
       // Filter against the deck AND against repeats inside this batch
-      const {fresh,skipped}=partitionNewCards(list);
+      const {fresh,skipped}=partitionNewCards(applyVerbPreps(list));
       bulkSource="import";
       bulkCards=fresh.map(c=>({...c,id:uid(),leitnerLevel:"V",nextReview:nrf("V")||Date.now(),createdAt:Date.now()}));
       bulkSkipped=skipped;
@@ -2621,18 +2850,21 @@ function rRoot(){
 
 function renderRootVerb(v){
   const words=bw();
+  // Verb forms always show (and get saved with) their prepositions.
+  const plain=`${v.past} · ${v.present} · ${v.masdar}`;
+  const full=attachPreps(plain,v.prepositions)||plain;
   const existing=words.find(w=>w.arabic&&(w.arabic.includes(v.past)||v.past.includes(w.arabic.split(' ')[0])));
   return`<div style="background:var(--panel);border:1px solid rgba(217,180,94,0.2);border-radius:14px;padding:18px;margin-bottom:12px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px">
       <div style="flex:1">
         <div style="font-size:10px;color:#D9B45E;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Form ${v.form||'I'}</div>
-        <div style="font-family:'Amiri',serif;direction:rtl;font-size:22px;color:#F0D48A;line-height:1.6;text-align:right">${v.past} · ${v.present} · ${v.masdar}</div>
-        <div style="font-size:10px;color:#8DB5A5;margin-top:4px;direction:rtl;text-align:right;font-family:'Amiri',serif">مَاضٍ · مُضَارِعٌ · مَصْدَرٌ</div>
+        <div style="font-family:'Amiri',serif;direction:rtl;font-size:22px;color:#F0D48A;line-height:1.6;text-align:right">${full}</div>
+        <div style="font-size:10px;color:#8DB5A5;margin-top:4px;direction:rtl;text-align:right;font-family:'Amiri',serif">مَاضٍ · مُضَارِعٌ · مَصْدَرٌ${full!==plain?" · + حَرْفُ الْجَرِّ":""}</div>
       </div>
     </div>
     <div style="font-size:14px;color:#EEE8D5;margin-bottom:8px">${v.english}</div>
     ${v.example?`<div style="font-family:'Amiri',serif;direction:rtl;font-size:14px;color:#8DB5A5;font-style:italic;text-align:right;line-height:1.7;margin-bottom:10px">${v.example}</div>`:''}
-    ${renderAddButtons(v.past+'·'+v.present+'·'+v.masdar, v.english, v.example||'', 'Verb')}
+    ${renderAddButtons(full, v.english, v.example||'', 'Verb')}
   </div>`;
 }
 
@@ -2675,11 +2907,12 @@ function renderAddButtons(arabic, english, example, wordType){
 
 function addRootWord(arabic, english, example, wordType, level){
   if(level==="L1Q"&&sessionWaitingBox())level=sessionWaitingBox(); // live session: waiting box for the current step
-  const arNorm=normArabic(arabic);
-  const existing=bw().find(w=>normArabic(w.arabic)===arNorm);
+  const arNorm=normArabic(verbBase(arabic)||arabic); // ignore the preposition segment when matching
+  const existing=bw().find(w=>normArabic(verbBase(w.arabic)||w.arabic)===arNorm);
   if(existing){toast('Already in '+lvi(existing.leitnerLevel).l,'#D9B45E');return;}
   const w={id:uid(),arabic,english,example,wordType,dialect:'MSA',leitnerLevel:level,nextReview:nrf(level)||Date.now(),createdAt:Date.now()};
   uw.push(w);saveUW();prog[w.id]={leitnerLevel:level,nextReview:nrf(level)||Date.now(),queuedAt:Date.now()};saveProgressToDB();
+  attachPrepsInBackground([w.id]);
   const lv=LV.find(l=>l.id===level);
   toast('"'+arabic.split('·')[0].trim()+'" added to '+(lv?lv.l:level)+' ✓');
   R(); // re-render to show checkmark
@@ -2713,8 +2946,9 @@ Return a comprehensive dictionary entry in the style of Hans Wehr. Include:
    - past tense (ماضي) fully vowelled
    - present tense (مضارع) fully vowelled  
    - masdar (مصدر) fully vowelled
-   - English meaning
-   - one natural example sentence in Arabic with full tashkeel
+   - the preposition(s) this verb form normally governs, as a JSON array of fully vowelled Arabic prepositions, most common first, at most 4 (e.g. ["عَنْ"]); an empty array [] if it takes its object directly and governs no preposition
+   - English meaning, written the way the verb is used with that preposition (e.g. "to search for"); if different prepositions change the meaning, give each: "to search for (عَنْ); to look into (فِي)"
+   - one natural example sentence in Arabic with full tashkeel that USES the verb with its preposition
 
 2. ALL derived nouns, adjectives, and participles from this root that appear in standard Arabic dictionaries. For each include:
    - singular form fully vowelled
@@ -2739,7 +2973,7 @@ Return ONLY valid JSON with no markdown:
 {
   "root": "the root letters",
   "verbs": [
-    {"form": "I", "past": "فَعَلَ", "present": "يَفْعُلُ", "masdar": "فِعْلٌ", "english": "to do", "example": "..."}
+    {"form": "I", "past": "فَعَلَ", "present": "يَفْعُلُ", "masdar": "فِعْلٌ", "prepositions": ["بِ"], "english": "to do", "example": "..."}
   ],
   "nouns": [
     {"singular": "فَاعِلٌ", "plural": "فَاعِلُونَ", "english": "doer", "example": "..."}
@@ -2990,11 +3224,13 @@ async function addWordFromApply(word, level){
   if(apiKey){
     try{
       const prompt=`You are an Arabic linguist. Generate a flashcard for this Arabic word: ${word}
+${VERB_PREP_RULES}
+If it is a verb, give the verb itself (past tense) in "arabic", and the example sentence should use it with its preposition.
 Return ONLY valid JSON (no markdown, no newlines inside strings):
-{"arabic":"${word} with full tashkeel","english":"English meaning","example":"Example sentence in Arabic with full tashkeel (English translation in parentheses)","wordType":"Noun or Verb or Adjective or Adverb or Phrase or Conjunction or Preposition or Other","dialect":"${applyDialect}"}`;
+{"arabic":"${word} with full tashkeel","english":"English meaning","example":"Example sentence in Arabic with full tashkeel (English translation in parentheses)","wordType":"Noun or Verb or Adjective or Adverb or Phrase or Conjunction or Preposition or Other","dialect":"${applyDialect}","prepositions":["only for verbs"]}`;
       const res=await fetch("https://tiny-sound-c8ff.jmorgansmith03.workers.dev",{method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
-        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:400,messages:[{role:"user",content:prompt}]})});
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:700,messages:[{role:"user",content:prompt}]})});
       const data=await res.json();
       if(!data.error){
         const raw=data.content?.map(c=>c.text||"").join("")||"";
@@ -3007,12 +3243,14 @@ Return ONLY valid JSON (no markdown, no newlines inside strings):
         english=parsed.english||"";
         example=parsed.example||"";
         wordType=parsed.wordType||"Noun";
+        if(wordType==="Verb"){const na=attachPreps(arabic,parsed.prepositions);if(na)arabic=na;}
       }
     }catch(e){console.warn("Card gen failed:",e);}
   }
 
   const w={id:uid(),arabic,english,example,wordType,dialect:applyDialect,leitnerLevel:level,nextReview:nrf(level)||Date.now(),createdAt:Date.now()};
   uw.push(w);saveUW();prog[w.id]={leitnerLevel:level,nextReview:nrf(level)||Date.now(),queuedAt:Date.now()};saveProgressToDB();
+  attachPrepsInBackground([w.id]);
   toast('"'+word+'" added to '+(lv?lv.l:level)+' ✓');
   R();
 }
@@ -3089,6 +3327,8 @@ function rSettings(){
       <button class="btn1" onclick="saveTarget()" style="font-size:13px;padding:10px 20px">Save</button>
     </div>
   </div>
+  ${sh("Verb Prepositions")}
+  ${prepCard()}
   ${sh("Sync")}
   <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:18px;margin-bottom:18px">
     <div style="font-size:11px;color:#8DB5A5;margin-bottom:12px;line-height:1.6">Progress syncs automatically after each review session. Force a sync now:</div>

@@ -229,3 +229,10 @@ button[onclick="gradeBonusCard(false)"]{border-color:rgba(240,122,122,.5)!import
 button[onclick="gradeBonusCard(true)"]{border-color:rgba(95,211,160,.55)!important;color:#A6EBCB!important;}
 /* Mirza has tall ascenders: give big titles room */
 [style*="Mirza"][style*="font-size:46px"],[style*="Mirza"][style*="font-size:50px"]{line-height:1.5!important;}
+
+/* Long entries (verbs with their prepositions): on a phone, give the Arabic and
+   English the full row and drop the buttons onto their own line underneath. */
+@media(max-width:480px){
+  .wr.wr-long{flex-wrap:wrap;}
+  .wr.wr-long .wr-act{flex-basis:100%;justify-content:flex-end;margin-top:2px;}
+}
