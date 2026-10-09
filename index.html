@@ -1949,6 +1949,7 @@ function rL(){
   ${lvlSelectMode?`<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;padding:10px 12px;background:rgba(217,180,94,0.06);border:1px solid rgba(217,180,94,0.2);border-radius:10px;flex-wrap:wrap">
     <span style="flex:1;font-size:12px;color:#EEE8D5;min-width:70px">${selectedCount} selected</span>
     <button onclick="selectAllInBox()" style="background:transparent;border:1px solid rgba(217,180,94,.25);border-radius:6px;padding:5px 10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px">All</button>
+    <button onclick="selectRecentInBox()" title="Select the words that arrived in this box recently" style="background:transparent;border:1px solid rgba(217,180,94,.25);border-radius:6px;padding:5px 10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:11px">Newest…</button>
     <button onclick="lvlSelected.clear();R()" style="background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:5px 10px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:11px">None</button>
     <select id="lvl-bulk-target" style="background:var(--panel);border:1px solid rgba(217,180,94,0.25);border-radius:6px;color:#8DB5A5;font-family:inherit;font-size:11px;padding:5px 6px;cursor:pointer">${LV.filter(l=>l.id!==al).map(l=>`<option value="${l.id}">${l.l}</option>`).join("")}</select>
     <button onclick="moveSelectedTo(document.getElementById('lvl-bulk-target').value)" ${selectedCount?"":"disabled"} style="background:rgba(217,180,94,0.15);border:1px solid #D9B45E;border-radius:6px;padding:5px 12px;color:#D9B45E;cursor:${selectedCount?"pointer":"not-allowed"};opacity:${selectedCount?1:.45};font-family:inherit;font-size:11px;font-weight:600">Move →</button>
@@ -1995,6 +1996,20 @@ async function demoteAllToVault(boxId){
 function toggleLvlSelect(id){if(lvlSelected.has(id))lvlSelected.delete(id);else lvlSelected.add(id);R();}
 function setLvlSelectMode(on){lvlSelectMode=!!on;if(!on)lvlSelected.clear();R();}
 function selectAllInBox(){bw().filter(w=>w.leitnerLevel===al).forEach(w=>lvlSelected.add(w.id));R();}
+// Select just the words that ARRIVED in this box lately (queuedAt is stamped on
+// every move into a box) — e.g. to send a batch that landed in the wrong place
+// straight back, without ticking them one by one.
+function selectRecentInBox(){
+  const ans=prompt("Select the words that arrived in this box within the last how many days?\n(1 = since yesterday, 0.5 = last 12 hours)","2");
+  if(ans===null)return;
+  const d=parseFloat(ans);
+  if(!(d>0)){toast("Enter a number of days, like 2","#F07A7A");return;}
+  const cutoff=Date.now()-d*86400000;
+  let n=0;
+  bw().filter(w=>w.leitnerLevel===al&&(w.queuedAt||0)>=cutoff).forEach(w=>{lvlSelected.add(w.id);n++;});
+  toast(n?`${n} word${n!==1?"s":""} selected`:"Nothing arrived in that time",n?"#5FD3A0":"#D9B45E");
+  R();
+}
 async function demoteSelectedToVault(){
   const ids=[...lvlSelected];
   if(!ids.length)return;
