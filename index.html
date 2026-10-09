@@ -250,14 +250,14 @@ function buildSession(pool,budget,prioritize){
   const fill=weightedSample(rest,budget-rescued.length,w=>TYPE_WEIGHT[w.wordType]||1.0);
   return{picked:rescued.concat(fill),rescued:rescued.length};
 }
-// Correct/incorrect destinations. L2B's correct route depends on the day —
-// everything else is fixed. Wrong answers always land in a waiting box;
+// Correct/incorrect destinations. Every destination is fixed — L2B correct always
+// goes to the L3 Queue (it used to skip straight to L3 except on Tue/Sat). Wrong answers always land in a waiting box;
 // correct answers land either in a waiting box or in a box that has already
 // run earlier this session (steps go high-to-low), so nothing is ever
 // quizzed twice in one sitting.
 function correctDest(level){
   if(level==="L1")return"L2A";
-  if(level==="L2B"){const day=new Date().getDay();return(day===2||day===6)?"L3Q":"L3";} // Tue/Sat -> waiting
+  if(level==="L2B")return"L3Q"; // always the waiting box — you release it into L3 yourself
   if(level==="L3")return"L4";
   if(level==="L4")return"L5A";
   if(level==="L5B")return"M";
