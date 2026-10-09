@@ -173,5 +173,47 @@
 
   // stars follow the mastered count after every render
   const layeredR=window.R;
-  window.R=function(){layeredR.apply(this,arguments);refreshStars(false);};
+  window.R=function(){layeredR.apply(this,arguments);refreshStars(false);showUpdateBar();};
+
+  // ── stay current ──
+  // An app that stays open (a tab, or the home-screen app on a phone) keeps
+  // running the version it started with, so new fixes never reach it until it's
+  // reloaded. Quietly compare the deployed files with the ones this page
+  // started with, and offer a one-tap update when they differ. Never shown on
+  // a card, so a session is never interrupted.
+  let bootSig=null,updateReady=false,lastCheck=0;
+  const hashStr=s=>{let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return(h>>>0).toString(36)+":"+s.length;};
+  async function siteSig(){
+    const files=["index.html","visuals.js","theme.css"];
+    const parts=await Promise.all(files.map(async f=>{
+      const r=await fetch(f+"?v="+Date.now(),{cache:"no-store"});
+      if(!r.ok)throw new Error(f+" "+r.status);
+      return hashStr(await r.text());
+    }));
+    return parts.join("|");
+  }
+  async function checkForUpdate(){
+    if(updateReady||!navigator.onLine)return;
+    lastCheck=Date.now();
+    try{
+      const sig=await siteSig();
+      if(bootSig===null){bootSig=sig;return;}        // first look = "this version"
+      if(sig!==bootSig){updateReady=true;if(typeof R==="function")R();}
+    }catch(e){/* offline or mid-deploy: try again later */}
+  }
+  function showUpdateBar(){
+    const shell=document.querySelector(".shell");
+    if(!updateReady||!shell||shell.querySelector(".upd-bar"))return;
+    if(typeof view!=="undefined"&&view==="review")return;   // never over a flashcard
+    shell.insertAdjacentHTML("afterbegin",'<div class="upd-bar"><span>A newer version of Mufradaati is ready.</span><button onclick="applyUpdate()">Update now</button></div>');
+  }
+  window.applyUpdate=async function(){
+    if(typeof sessionActive!=="undefined"&&sessionActive&&!confirm("Your session in progress will end. Update anyway?"))return;
+    try{if(typeof saveProgressToDB==="function")await saveProgressToDB();}catch(e){}   // save first, then reload
+    location.reload();
+  };
+  window.checkForUpdate=checkForUpdate;
+  setTimeout(checkForUpdate,3000);                               // learn what "this version" looks like
+  setInterval(()=>{if(document.visibilityState==="visible"&&Date.now()-lastCheck>20*60*1000)checkForUpdate();},60*1000);
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&Date.now()-lastCheck>5*60*1000)checkForUpdate();});
 })();

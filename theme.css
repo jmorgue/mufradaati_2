@@ -236,3 +236,7 @@ button[onclick="gradeBonusCard(true)"]{border-color:rgba(95,211,160,.55)!importa
   .wr.wr-long{flex-wrap:wrap;}
   .wr.wr-long .wr-act{flex-basis:100%;justify-content:flex-end;margin-top:2px;}
 }
+
+/* "A newer version is ready" bar — only on screens that aren't a flashcard */
+.upd-bar{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:9px 14px;margin:0 0 10px;background:rgba(217,180,94,.12);border:1px solid rgba(217,180,94,.4);border-top:none;border-radius:0 0 12px 12px;font-size:12px;color:#EEE8D5;text-align:center;}
+.upd-bar button{background:linear-gradient(135deg,#B98A2E,#F0D48A);color:#06251B;border:none;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;}
