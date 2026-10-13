@@ -117,6 +117,7 @@ nav .nb{white-space:nowrap;}
 <script src="art.js"></script>
 <script src="medina.js" defer></script>
 <script src="visuals.js" defer></script>
+<script src="practice.js" defer></script>
 <link rel="stylesheet" href="theme.css"/>
 </head>
 <body>
@@ -3383,11 +3384,21 @@ function rApply(){
         <div style="font-size:14px;font-weight:600;color:${applyMode==="grammar"?"#D9B45E":"#EEE8D5"}">Grammar Focus</div>
         <div style="font-size:11px;color:#8DB5A5;margin-top:5px;line-height:1.5">Drill a specific grammatical structure</div>
       </div>
+      <div onclick="applyMode='translate';applyResult=null;R()" style="background:${applyMode==="translate"?"rgba(217,180,94,0.1)":"var(--panel)"};border:1px solid ${applyMode==="translate"?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:14px;padding:18px 14px;cursor:pointer;text-align:center">
+        <div style="font-size:24px;margin-bottom:8px">🔁</div>
+        <div style="font-size:14px;font-weight:600;color:${applyMode==="translate"?"#D9B45E":"#EEE8D5"}">Translate</div>
+        <div style="font-size:11px;color:#8DB5A5;margin-top:5px;line-height:1.5">English to Arabic, using your mastered words</div>
+      </div>
+      <div onclick="applyMode='case';applyResult=null;R()" style="background:${applyMode==="case"?"rgba(217,180,94,0.1)":"var(--panel)"};border:1px solid ${applyMode==="case"?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:14px;padding:18px 14px;cursor:pointer;text-align:center">
+        <div style="font-size:24px;margin-bottom:8px">✍️</div>
+        <div style="font-size:14px;font-weight:600;color:${applyMode==="case"?"#D9B45E":"#EEE8D5"}">Case Endings</div>
+        <div style="font-size:11px;color:#8DB5A5;margin-top:5px;line-height:1.5">Add the إعراب to sentences with your words</div>
+      </div>
     </div>`;
 
   const dialectSelect=`<div style="margin-bottom:16px">
     <label class="lbl">Dialect</label>
-    <select class="inp" style="cursor:pointer;font-size:13px;padding:10px 12px" onchange="applyDialect=this.value;applyResult=null">
+    <select class="inp" style="cursor:pointer;font-size:13px;padding:10px 12px" onchange="applyDialect=this.value;applyResult=null;R()">
       ${DL.map(d=>`<option value="${d}"${d===applyDialect?" selected":""}>${d}</option>`).join("")}
     </select>
   </div>`;
@@ -3400,6 +3411,10 @@ function rApply(){
       </div>`:""}
       ${!hasKey?`<div style="padding:10px 14px;background:rgba(240,122,122,0.08);border:1px solid rgba(240,122,122,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;color:#F07A7A">No API key. <span style="cursor:pointer;text-decoration:underline" onclick="V('settings')">Add it in Settings</span></div>`:""}
       <button class="btn1" id="apply-btn" onclick="generateApply()" style="width:100%;justify-content:center"${!hasKey?" disabled":""}>📖 Generate Paragraph</button>`;
+  } else if(applyMode==="translate"){
+    modeContent=rPracticeTranslate(hasKey);
+  } else if(applyMode==="case"){
+    modeContent=rPracticeCase(hasKey);
   } else {
     const grid=GRAMMAR_STRUCTURES.map(g=>`
       <div onclick="applyStructure='${g.id}';applyResult=null;R()" style="background:${applyStructure===g.id?"rgba(217,180,94,0.12)":"var(--panel)"};border:1px solid ${applyStructure===g.id?"#D9B45E":"rgba(217,180,94,0.12)"};border-radius:12px;padding:12px 10px;cursor:pointer;text-align:center">
