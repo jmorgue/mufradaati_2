@@ -3394,6 +3394,16 @@ function rApply(){
         <div style="font-size:14px;font-weight:600;color:${applyMode==="case"?"#D9B45E":"#EEE8D5"}">Case Endings</div>
         <div style="font-size:11px;color:#8DB5A5;margin-top:5px;line-height:1.5">Add the إعراب to sentences with your words</div>
       </div>
+      <div onclick="applyMode='cloze';applyResult=null;R()" style="background:${applyMode==="cloze"?"rgba(217,180,94,0.1)":"var(--panel)"};border:1px solid ${applyMode==="cloze"?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:14px;padding:18px 14px;cursor:pointer;text-align:center">
+        <div style="font-size:24px;margin-bottom:8px">🧩</div>
+        <div style="font-size:14px;font-weight:600;color:${applyMode==="cloze"?"#D9B45E":"#EEE8D5"}">Cloze</div>
+        <div style="font-size:11px;color:#8DB5A5;margin-top:5px;line-height:1.5">Fill the blank in your own example sentences</div>
+      </div>
+      <div onclick="applyMode='journal';applyResult=null;R()" style="background:${applyMode==="journal"?"rgba(217,180,94,0.1)":"var(--panel)"};border:1px solid ${applyMode==="journal"?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:14px;padding:18px 14px;cursor:pointer;text-align:center">
+        <div style="font-size:24px;margin-bottom:8px">📓</div>
+        <div style="font-size:14px;font-weight:600;color:${applyMode==="journal"?"#D9B45E":"#EEE8D5"}">Journal</div>
+        <div style="font-size:11px;color:#8DB5A5;margin-top:5px;line-height:1.5">Write with a word challenge, get feedback</div>
+      </div>
     </div>`;
 
   const dialectSelect=`<div style="margin-bottom:16px">
@@ -3415,6 +3425,10 @@ function rApply(){
     modeContent=rPracticeTranslate(hasKey);
   } else if(applyMode==="case"){
     modeContent=rPracticeCase(hasKey);
+  } else if(applyMode==="cloze"){
+    modeContent=rPracticeCloze();
+  } else if(applyMode==="journal"){
+    modeContent=rPracticeJournal(hasKey);
   } else {
     const grid=GRAMMAR_STRUCTURES.map(g=>`
       <div onclick="applyStructure='${g.id}';applyResult=null;R()" style="background:${applyStructure===g.id?"rgba(217,180,94,0.12)":"var(--panel)"};border:1px solid ${applyStructure===g.id?"#D9B45E":"rgba(217,180,94,0.12)"};border-radius:12px;padding:12px 10px;cursor:pointer;text-align:center">
