@@ -120,6 +120,7 @@ window.trCheck=async function(){
     const res={score:Math.max(1,Math.min(5,Math.round(+r.score)||1)),verdict:r.verdict||"",model:r.model||"",alt:r.alt||"",
       structure:r.structure||"",corrections:Array.isArray(r.corrections)?r.corrections.slice(0,6):[]};
     b.result=res;b.attempt=trSt.attempt.trim();b.scores.push(res.score);
+    window.statsLog&&statsLog("tr",1,res.score>=4?1:0);
     const d=store();
     d.tr.n++;d.tr.sum+=res.score;if(res.score>=4)d.tr.good++;
     const f=d.tr.byFocus[b.focus]||(d.tr.byFocus[b.focus]={n:0,sum:0});f.n++;f.sum+=res.score;
@@ -417,6 +418,7 @@ window.csSubmit=function(){
   if(!sameBase(item.v,b.text))return;
   const r=grade(item,b.text);
   b.result=r;b.scores.push(r.perfect?1:0);
+  window.statsLog&&statsLog("cs",r.n,r.ok);
   const d=store(),c=d.cs;
   c.sent++;c.words+=r.n;c.ok+=r.ok;
   r.words.filter(w=>w.graded).forEach(w=>{
@@ -536,7 +538,7 @@ function clDraw(){
   for(let t=0;t<6;t++){c=list[Math.floor(Math.random()*list.length)];if(!clSt.cur||c.w.id!==clSt.cur.w.id)break;}
   clSt.cur=c;clSt.count=list.length;
 }
-function clLog(ok){const d=store();d.cl=d.cl||{n:0,ok:0};d.cl.n++;if(ok)d.cl.ok++;save(d);}
+function clLog(ok){window.statsLog&&statsLog("cl",1,ok?1:0);const d=store();d.cl=d.cl||{n:0,ok:0};d.cl.n++;if(ok)d.cl.ok++;save(d);}
 window.clAns=v=>{clSt.ans=v;};
 window.clMean=()=>{clSt.mean=true;R();};
 window.clNext=()=>{clDraw();R();};
@@ -622,6 +624,7 @@ window.jSave=async function(withFb){
   if(!jSt.text.trim())return;
   const e={id:"j"+Date.now().toString(36),date:new Date().toISOString().slice(0,10),variety:applyDialect,
     prompt:jSt.prompt||"",text:jSt.text.trim(),words:wcount(jSt.text),challenge:jSt.challenge,feedback:null};
+  window.statsLog&&statsLog("jw",e.words,0);
   jMut(a=>{a.unshift(e);if(a.length>150)a.length=150;});
   jSt.text="";jSt.prompt=null;jSt.challenge=null;jSt.sel=e.id;jSt.confirm=false;R();
   if(withFb)await window.jFeedback(e.id);

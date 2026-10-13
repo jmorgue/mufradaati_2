@@ -117,6 +117,7 @@ nav .nb{white-space:nowrap;}
 <script src="art.js"></script>
 <script src="medina.js" defer></script>
 <script src="visuals.js" defer></script>
+<script src="stats.js" defer></script>
 <script src="practice.js" defer></script>
 <link rel="stylesheet" href="theme.css"/>
 </head>
@@ -1612,7 +1613,7 @@ function toast(msg,c="#F0D48A"){
 
 function V(v){
   view=v;
-  ["home","levels","add","apply","root","import","settings"].forEach(k=>{
+  ["home","levels","add","apply","stats","root","import","settings"].forEach(k=>{
     const e=document.getElementById("n-"+k);if(!e)return;
     e.className="nb"+((k==="home"&&["home","review-setup","review","release-prompt","done","bonus-config","bonus","bonus-done"].includes(v))||k===v?" act":"");
   });
@@ -1630,12 +1631,13 @@ function R(){
         <span style="font-family:'Mirza','Amiri',serif;font-size:24px;color:#D9B45E">مفرداتي</span>
         <span style="font-size:10px;color:#8DB5A5;letter-spacing:.15em;text-transform:uppercase">Mufradaati</span>
       </div>
-      <div style="display:flex;gap:3px;align-items:center">
+      <div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap;justify-content:center">
         <span class="sync-dot" id="sync-dot" title="Sync status"></span>
         <button class="nb${["home","review-setup","review","release-prompt","done","bonus-config","bonus","bonus-done"].includes(view)?" act":""}" id="n-home" onclick="V('home')">Home</button>
         <button class="nb${view==="levels"?" act":""}" id="n-levels" onclick="V('levels')">Levels</button>
         <button class="nb${view==="add"?" act":""}" id="n-add" onclick="V('add')">Add</button>
         <button class="nb${view==="apply"?" act":""}" id="n-apply" onclick="V('apply')">Apply</button>
+        <button class="nb${view==="stats"?" act":""}" id="n-stats" onclick="V('stats')">Stats</button>
         <button class="nb${view==="root"?" act":""}" id="n-root" onclick="V('root')">Root</button>
         <button class="nb${view==="import"?" act":""}" id="n-import" style="color:rgba(217,180,94,.7)" onclick="V('import')">✦</button>
         <button class="nb${view==="settings"?" act":""}" id="n-settings" style="color:rgba(240,212,138,.7)" onclick="V('settings')">⚙</button>
@@ -1644,7 +1646,7 @@ function R(){
     <div id="main"></div>
   </div>`;
   const m=document.getElementById("main");if(!m)return;
-  const map={home:rH,levels:rL,add:rA,apply:rApply,root:rRoot,import:rI,settings:rSettings,"review-setup":rRS,review:rRV,"release-prompt":rReleasePrompt,"prep-review":rPrepReview,done:rD,"bonus-config":rBonusConfig,bonus:rBonus,"bonus-done":rBonusDone};
+  const map={home:rH,levels:rL,add:rA,apply:rApply,stats:rStats,root:rRoot,import:rI,settings:rSettings,"review-setup":rRS,review:rRV,"release-prompt":rReleasePrompt,"prep-review":rPrepReview,done:rD,"bonus-config":rBonusConfig,bonus:rBonus,"bonus-done":rBonusDone};
   m.innerHTML=(map[view]||rH)();
   // Refresh sync dot after every render — error/offline states must persist across re-renders
   setSyncDot(syncing);
@@ -2674,6 +2676,7 @@ async function RC(a){
     prog[card.id]={...(prog[card.id]||{}),leitnerLevel:correctDest(level),nextReview:nowTs,queuedAt:nowTs,doneDay:today};
   }
   rr.push(a);
+  if(window.statsLog)statsLog("rv",1,a==="again"?0:1);
   if(sessionRemaining!==null)sessionRemaining=Math.max(0,sessionRemaining-1); // spend one of today's session size
   markStepRan(level); // this level has started today — releases into it now wait until tomorrow
   scheduleSync(); // save after every card so progress is never lost
