@@ -498,6 +498,198 @@ window.csLen=v=>{csSt.len=v;R();};
 // palette buttons call csMark(CM_<name>)
 Object.keys(CM).forEach(k=>{window["CM_"+k]=CM[k];});
 
+/* =====================================================================
+   CLOZE (no AI): blank a mastered word in its own example sentence
+   ===================================================================== */
+function findBlank(w){
+  const m=String(w.example||"").match(/^([\s\S]*?)\s*\(([^()]*[A-Za-z][^()]*)\)\s*$/);
+  const sent=(m?m[1]:String(w.example||"")).trim();
+  const eng=m?m[2].trim():"";
+  const tokens=sent.split(/\s+/).filter(Boolean);
+  if(tokens.length<3)return null;
+  const variants=[...new Set(String(w.arabic).split(/\s*[·,،\/]\s*/).map(norm).filter(v=>v.length>=2&&/^[ء-ي ]+$/.test(v)))];
+  // present-tense verb forms start with ي; the same stem appears with أ ت ن ي in sentences
+  const stems=variants.filter(v=>/^ي.{2,}/.test(v)).map(v=>v.slice(1));
+  const clean=tokens.map(norm);
+  const tries=[...variants.map(v=>({v,pre:"[وفبلك]?(?:ال)?"})),...stems.map(v=>({v,pre:"[وفبلك]?[يتنا]"}))];
+  for(const{v,pre}of tries){
+    const k=v.split(" ").length;
+    const re=new RegExp("^"+pre+v+"(?:ها|هم|هن|كم|ني|نا|ان|ين|ون|ات|وا|ه|ك|ي|ت)?$");
+    for(let i=0;i+k<=tokens.length;i++){
+      const joined=clean.slice(i,i+k).join(" ");
+      if(!re.test(joined))continue;
+      const last=tokens[i+k-1];
+      const punct=(last.match(/[.,،؟?!؛:]+$/)||[""])[0];
+      const shown=tokens.slice(i,i+k).join(" ").replace(/[.,،؟?!؛:]+$/,"");
+      return{before:tokens.slice(0,i).join(" "),after:tokens.slice(i+k).join(" "),shown,punct,eng,
+        accepted:[...new Set([joined,v,"ال"+v,joined.replace(/^ال/,"")])]};
+    }
+  }
+  return null;
+}
+const clSt={cur:null,dia:null,ans:"",status:null,mean:false,sess:{n:0,ok:0}};
+function clDraw(){
+  const list=pool().map(w=>({w,b:findBlank(w)})).filter(x=>x.b);
+  clSt.dia=applyDialect;clSt.ans="";clSt.status=null;clSt.mean=false;
+  if(!list.length){clSt.cur=null;return;}
+  let c=list[0];
+  for(let t=0;t<6;t++){c=list[Math.floor(Math.random()*list.length)];if(!clSt.cur||c.w.id!==clSt.cur.w.id)break;}
+  clSt.cur=c;clSt.count=list.length;
+}
+function clLog(ok){const d=store();d.cl=d.cl||{n:0,ok:0};d.cl.n++;if(ok)d.cl.ok++;save(d);}
+window.clAns=v=>{clSt.ans=v;};
+window.clMean=()=>{clSt.mean=true;R();};
+window.clNext=()=>{clDraw();R();};
+window.clCheck=()=>{
+  if(clSt.status||!clSt.cur)return;
+  const a=norm(clSt.ans);if(!a)return;
+  const ok=clSt.cur.b.accepted.includes(a);
+  clSt.status=ok?"right":"wrong";clSt.sess.n++;if(ok)clSt.sess.ok++;clLog(ok);R();
+};
+window.clReveal=()=>{
+  if(clSt.status||!clSt.cur)return;
+  clSt.status="revealed";clSt.sess.n++;clLog(false);R();
+};
+window.clKey=e=>{if(e.key==="Enter"){clSt.status?window.clNext():window.clCheck();}};
+
+function rCloze(){
+  if(!clSt.cur||clSt.dia!==applyDialect)clDraw();
+  const c=clSt.cur,d=(store().cl)||{n:0,ok:0};
+  if(!c)return notice(`No ${esc(applyDialect)} mastered words have a usable example sentence yet. Cards need an example that contains the word.`);
+  const st=clSt.status;
+  const shown=st?`<b style="color:${st==="right"?MINT:ROSE}">${esc(c.b.shown)}</b>`:`<span style="display:inline-block;min-width:72px;border-bottom:3px solid ${GOLD};text-align:center;color:${GOLD}">＿＿＿＿</span>`;
+  return notice(`Fill the blank with the mastered word. Sentences come from your own cards, so this costs nothing. <strong style="color:${GOLD}">${clSt.count}</strong> ${esc(applyDialect)} words have a usable sentence.`)+
+  card(`
+    <div style="${AMIRI}font-size:26px;line-height:2.1;text-align:right;color:${INK}">${c.b.before?esc(c.b.before)+" ":""}${shown}${esc(c.b.punct)}${c.b.after?" "+esc(c.b.after):""}</div>
+    ${!st?(clSt.mean?`<div style="font-size:13px;color:${GOLD};background:rgba(217,180,94,0.08);border-radius:8px;padding:8px 10px;margin:8px 0">${esc(c.w.english)}</div>`
+      :`<div style="font-size:12px;color:${GOLD};cursor:pointer;margin:8px 0" onclick="clMean()">Show meaning</div>`):""}
+    <input id="cl-in" class="inp" dir="rtl" autocomplete="off" style="${AMIRI}font-size:22px;width:100%;margin-top:6px" placeholder="اُكْتُبِ الكَلِمَة…" value="${esc(clSt.ans)}"${st?" disabled":""} oninput="clAns(this.value)" onkeydown="clKey(event)">
+    ${st?`<div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="color:${st==="right"?MINT:ROSE}">${st==="right"?"Correct.":st==="revealed"?"Revealed.":"Not quite."}</b>
+        <span style="${AMIRI}font-size:20px;color:${INK}">${esc(c.w.arabic)}</span><span style="font-size:13px;color:${SAGE}">${esc(c.w.english)}</span></div>
+      ${c.b.eng?`<div style="font-size:13px;color:${SAGE}">${esc(c.b.eng)}</div>`:""}</div>`:""}
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn2" style="flex:1;text-align:center" onclick="clNext()">Skip</button>
+      ${!st?`<button class="btn2" style="flex:1;text-align:center" onclick="clReveal()">Show answer</button>
+        <button class="btn1" style="flex:1;justify-content:center" onclick="clCheck()">Check</button>`
+        :`<button class="btn1" style="flex:2;justify-content:center" onclick="clNext()">Next</button>`}
+    </div>`)+
+  `<div style="font-size:11px;color:${SAGE};margin-top:18px">${clSt.sess.n?`This session: ${clSt.sess.ok} of ${clSt.sess.n}. `:""}${d.n?`All time: ${d.ok} of ${d.n} (${Math.round(d.ok/d.n*100)}%).`:""}</div>`;
+}
+
+/* =====================================================================
+   JOURNAL: write in Arabic with a mastered-word challenge, then get feedback
+   ===================================================================== */
+const J_PROMPTS=[
+  "If you could live one year anywhere in the Arab world, where and why?",
+  "If you hadn't started Arabic, what would you be doing right now?",
+  "Compare life in two places you know well. Which would you pick to raise a family?",
+  "Dialect first or Fusha first? Pick a side and defend it.",
+  "Should universities require a foreign language? Take a side.",
+  "Narrate yesterday hour by hour. No skipping the boring parts.",
+  "How did you first get hooked on Arabic? Tell it as a story.",
+  "Describe your childhood home so well someone could draw it.",
+];
+const jFbSys=v=>`You are a sharp, encouraging Arabic writing coach. The learner is intermediate-advanced and wants to improve SENTENCE STRUCTURE (word order, clause linking, agreement, verb choice), not just vocabulary.
+The entry is written in ${v==="MSA"?"Modern Standard Arabic (Fusha). Flag any dialect intrusions as register mixing.":vName(v)+". Correct it as natural "+v+". Do NOT convert it to Fusha. Only flag things you are confident about."}
+Return ONLY a JSON object, no preamble, no markdown fences:
+{"overall":"1-2 sentences in English: the biggest structural takeaway",
+"upgrade":{"original":"one sentence from the entry","better":"a more native, more sophisticated rewrite with full diacritics","why":"short English explanation"},
+"corrections":[{"wrong":"exact snippet from the entry","right":"corrected snippet with full diacritics","why":"short English explanation"}]}
+Rules: at most 8 corrections, most important first. Keep snippets short (a few words). If the entry is clean, return an empty corrections array and still give an upgrade.`;
+const jSt={text:"",prompt:null,challenge:null,sel:null,busy:false,err:"",confirm:false};
+const wcount=t=>t.trim().split(/\s+/).filter(Boolean).length;
+const jEntries=()=>(store().j||[]);
+function jMut(fn){const d=store();d.j=d.j||[];fn(d.j);save(d);}
+
+window.jText=v=>{jSt.text=v;};
+window.jPrompt=()=>{jSt.prompt=J_PROMPTS[Math.floor(Math.random()*J_PROMPTS.length)];R();};
+window.jChallenge=()=>{
+  const p=pool();if(p.length<5){toast("Master at least 5 "+applyDialect+" words first",GOLD);return;}
+  jSt.challenge=sample(p,5).map(w=>({ar:headWord(w),en:w.english,used:false}));R();
+};
+window.jClearCh=()=>{jSt.challenge=null;R();};
+window.jUse=i=>{jSt.challenge[i].used=!jSt.challenge[i].used;R();};
+window.jOpen=id=>{jSt.sel=id;jSt.err="";jSt.confirm=false;R();};
+window.jClose=()=>{jSt.sel=null;jSt.confirm=false;R();};
+window.jDel=id=>{
+  if(!jSt.confirm){jSt.confirm=true;R();return;}
+  jMut(a=>{const i=a.findIndex(e=>e.id===id);if(i>=0)a.splice(i,1);});
+  jSt.sel=null;jSt.confirm=false;R();
+};
+window.jSave=async function(withFb){
+  const ta=document.getElementById("j-ta");if(ta)jSt.text=ta.value;
+  if(!jSt.text.trim())return;
+  const e={id:"j"+Date.now().toString(36),date:new Date().toISOString().slice(0,10),variety:applyDialect,
+    prompt:jSt.prompt||"",text:jSt.text.trim(),words:wcount(jSt.text),challenge:jSt.challenge,feedback:null};
+  jMut(a=>{a.unshift(e);if(a.length>150)a.length=150;});
+  jSt.text="";jSt.prompt=null;jSt.challenge=null;jSt.sel=e.id;jSt.confirm=false;R();
+  if(withFb)await window.jFeedback(e.id);
+};
+window.jFeedback=async function(id){
+  const e=jEntries().find(x=>x.id===id);if(!e)return;
+  jSt.busy=true;jSt.err="";R();
+  try{
+    const note=e.challenge&&e.challenge.length?`\n\n(Not part of the entry. The learner was challenged to use these words: ${e.challenge.map(c=>`${c.ar} = ${c.en}`).join("; ")}. If any were used incorrectly, mention it in "overall" and add a correction.)`:"";
+    const fb=await ai(jFbSys(e.variety),e.text+note,1800);
+    const clean={overall:fb.overall||"",upgrade:fb.upgrade||null,corrections:Array.isArray(fb.corrections)?fb.corrections.slice(0,8):[]};
+    jMut(a=>{const x=a.find(y=>y.id===id);if(x)x.feedback=clean;});
+  }catch(x){jSt.err=x.message==="parse"?"Feedback didn't come back cleanly. Try again.":x.message;}
+  jSt.busy=false;R();
+};
+
+function jFeedbackHtml(fb){
+  return`<div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+    ${fb.overall?`<div style="font-size:13px;color:${INK};border-left:3px solid ${GOLD};padding-left:10px">${esc(fb.overall)}</div>`:""}
+    ${fb.upgrade&&fb.upgrade.better?`<div style="background:rgba(217,180,94,0.08);border-radius:10px;padding:10px 12px">
+      <div style="font-size:11px;font-weight:600;color:${GOLD};margin-bottom:4px">Sentence upgrade</div>
+      <div style="${AMIRI}font-size:16px;color:${SAGE};text-align:right">${esc(fb.upgrade.original)}</div>
+      <div style="${AMIRI}font-size:19px;color:${INK};text-align:right;margin-top:4px">${esc(fb.upgrade.better)}</div>
+      <div style="font-size:12px;color:${SAGE};margin-top:4px">${esc(fb.upgrade.why)}</div></div>`:""}
+    ${fb.corrections.length?corrList(fb.corrections):`<div style="font-size:13px;color:${SAGE}">No errors flagged. Suspicious, but congratulations.</div>`}</div>`;
+}
+
+function rJournal(hasKey){
+  const entries=jEntries(),sel=jSt.sel&&entries.find(e=>e.id===jSt.sel);
+  const p=pool();
+  if(sel){
+    return`<div style="font-size:12px;color:${GOLD};cursor:pointer;margin-bottom:10px" onclick="jClose()">← All entries</div>`+card(`
+      <div style="font-size:11px;color:${SAGE};margin-bottom:6px">${esc(sel.date)} · ${esc(sel.variety)} · ${sel.words} words</div>
+      ${sel.prompt?`<div style="font-size:12px;color:${SAGE};margin-bottom:6px">Prompt: ${esc(sel.prompt)}</div>`:""}
+      ${sel.challenge?`<div style="font-size:12px;color:${SAGE};margin-bottom:6px">Word challenge: ${sel.challenge.filter(c=>c.used).length} of ${sel.challenge.length} ticked. <span style="${AMIRI}font-size:15px">${sel.challenge.map(c=>esc(c.ar)).join("، ")}</span></div>`:""}
+      <div style="${AMIRI}font-size:19px;line-height:2;text-align:right;color:${INK};white-space:pre-wrap;background:rgba(255,255,255,0.03);border-radius:10px;padding:12px">${esc(sel.text)}</div>
+      ${sel.feedback?jFeedbackHtml(sel.feedback):`<button class="btn1" style="width:100%;justify-content:center;margin-top:12px" onclick="jFeedback('${sel.id}')"${jSt.busy||!hasKey?" disabled":""}>${jSt.busy?'<span class="spinner"></span>Reading your Arabic...':"Get feedback"}</button>`}
+      ${jSt.err?`<div style="font-size:12px;color:${ROSE};margin-top:10px">${esc(jSt.err)}</div>`:""}
+      <div style="display:flex;gap:8px;margin-top:14px">
+        ${sel.feedback?`<button class="btn2" style="flex:1;text-align:center" onclick="jFeedback('${sel.id}')"${jSt.busy||!hasKey?" disabled":""}>${jSt.busy?"Working...":"Re-run feedback"}</button>`:""}
+        <button class="btn2" style="flex:1;text-align:center;color:${ROSE}" onclick="jDel('${sel.id}')">${jSt.confirm?"Confirm delete":"Delete"}</button></div>`);
+  }
+  const ch=jSt.challenge;
+  const challengeHtml=ch?`<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-size:11px;color:${SAGE}">Word challenge: tap each word once you've used it (${ch.filter(c=>c.used).length}/${ch.length})</span>
+      <span style="font-size:11px;color:${GOLD};cursor:pointer" onclick="jClearCh()">Clear</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${ch.map((c,i)=>`<div onclick="jUse(${i})" style="cursor:pointer;border:1px solid ${c.used?"rgba(95,211,160,0.5)":"rgba(217,180,94,0.25)"};background:${c.used?"rgba(95,211,160,0.12)":"var(--panel)"};border-radius:10px;padding:4px 12px;text-align:center">
+      <div style="${AMIRI}font-size:18px;color:${INK};${c.used?"text-decoration:line-through":""}">${esc(c.ar)}</div><div style="font-size:11px;color:${SAGE}">${esc(c.en)}</div></div>`).join("")}</div></div>`
+    :`<button class="btn2" style="width:100%;text-align:center;margin-bottom:12px" onclick="jChallenge()"${p.length<5?" disabled":""}>Word challenge: use 5 mastered words</button>`;
+  const list=entries.length?`<div style="margin-top:18px">${sh("Entries")}${entries.slice(0,30).map(e=>`<div onclick="jOpen('${e.id}')" style="cursor:pointer;border:1px solid rgba(217,180,94,0.18);background:var(--panel);border-radius:10px;padding:10px 12px;margin-bottom:6px">
+      <div style="font-size:11px;color:${SAGE}">${esc(e.date)} · ${esc(e.variety)} · ${e.words}w${e.feedback?` <span style="color:${MINT}">● feedback</span>`:""}</div>
+      <div style="${AMIRI}font-size:16px;color:${INK};text-align:right;margin-top:3px">${esc(e.text.slice(0,90))}${e.text.length>90?"…":""}</div></div>`).join("")}</div>`:"";
+  const words=entries.reduce((a,e)=>a+e.words,0);
+  return(!hasKey?notice("No API key, so you can save entries but not get feedback. <span style=\"cursor:pointer;text-decoration:underline\" onclick=\"V('settings')\">Add it in Settings</span>",ROSE):"")+
+    `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="font-size:13px;color:${INK}">${jSt.prompt?esc(jSt.prompt):`<span style="color:${SAGE}">Write about anything, or pull a prompt.</span>`}</div>
+      <button class="btn2" onclick="jPrompt()" style="white-space:nowrap">Prompt</button></div>`+
+    challengeHtml+
+    `<textarea id="j-ta" class="inp" dir="rtl" style="${AMIRI}font-size:20px;line-height:1.9;min-height:200px;width:100%" placeholder="اُكْتُبْ هُنا…" oninput="jText(this.value)">${esc(jSt.text)}</textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn2" style="flex:1;text-align:center" onclick="jSave(false)">Save entry</button>
+      <button class="btn1" style="flex:2;justify-content:center" onclick="jSave(true)"${hasKey&&!jSt.busy?"":" disabled"}>Save and get feedback</button></div>`+
+    list+
+    (entries.length?`<div style="font-size:11px;color:${SAGE};margin-top:14px">${entries.length} entr${entries.length===1?"y":"ies"}, ${words} words written. Entries are saved on this device.</div>`:"");
+}
+
+window.rPracticeCloze=rCloze;
+window.rPracticeJournal=rJournal;
 window.rPracticeTranslate=rTranslate;
 window.rPracticeCase=rCase;
 })();
