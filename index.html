@@ -202,7 +202,7 @@ function setPrioritizeTypes(on){sLS("mufradat-prioritize-types",!!on);R();}
 // session down to exactly that slice, across every selected level.
 // Also skips anything already done today, so a second capped session (say
 // 20 more words) is always fresh words, never the ones you just saw.
-function sessionMatch(w){return!heldToday(w)&&(df==="All"||w.dialect===df)&&(wtf==="All"||w.wordType===wtf);}
+function sessionMatch(w){return(includeDone||!heldToday(w))&&(df==="All"||w.dialect===df)&&(wtf==="All"||w.wordType===wtf);}
 
 // ── "done today" tracking ──
 // doneDay (local-only, like stars/strikes — no DB column) is stamped on a word
@@ -653,6 +653,7 @@ function sLS(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
 let CU=null; // current user {id,username}
 let prog={},uw=[],wt=60,view="auth",al="L1",df="All",el=new Set(["L1"]);
 let wtf="All"; // word-type filter for the NEXT session only (Review Setup); "All" = no restriction
+let includeDone=false; // opt-in on Review Setup: also review words already done today (normally skipped)
 let rq=[],ri=0,rd="en-ar",rr=[],fl=false;
 // Review-session engine: sessionSteps is the fixed high-to-low list of boxes
 // for this session; stepIdx tracks which one is currently running; rq/ri are
@@ -1766,10 +1767,18 @@ function rH(){
     babCls=doneToday?"ajar":"";
     babText=`<div><span style="color:#F0D48A;font-weight:700;font-size:34px">${dn.length}</span><span style="font-size:13px;color:#8DB5A5;margin-left:8px">word${dn.length!==1?"s":""} to review</span></div><div class="bab-cap">Tap the door to enter the medina</div>`;
   } else {
-    const rev=words.filter(w=>lvi(w.leitnerLevel).r).sort((a,b)=>a.nextReview-b.nextReview);
-    let nx="";if(rev.length){const h=Math.ceil((rev[0].nextReview-Date.now())/3600000);nx=`Next in ${h<24?h+"h":Math.ceil(h/24)+"d"}`;}
-    babCls=doneToday?"ajar":"shut";babClick=doneToday?"enterBab(this)":"";
-    babText=`<div style="font-size:13px;color:#8DB5A5">All caught up!</div><div style="font-size:11px;color:#8DB5A5;margin-top:4px;opacity:.6">${nx}</div>${doneToday?`<div class="bab-cap">Session complete for today</div>`:""}`;
+    // Nothing is due today. You can still study: the door stays usable (dimmed)
+    // and opens Review Setup with every level that has words left selected.
+    const studyable=words.filter(w=>lvi(w.leitnerLevel).r).length;
+    if(!studyable){
+      babCls="shut";babClick="";
+      babText=`<div style="font-size:13px;color:#8DB5A5">Nothing to study yet</div><div style="font-size:11px;color:#8DB5A5;margin-top:4px;line-height:1.5">Words in the queues and the Vault wait until you release them into a level.</div>`;
+    }else{
+      babCls=doneToday?"ajar":"dim";babClick="enterBab(this)";
+      babText=`<div style="font-size:13px;color:#8DB5A5">${doneToday?"Session complete for today":"Nothing due today"}</div>
+        <div class="bab-cap">Tap the door to study anyway</div>
+        <button class="btn2" onclick="ORS()" style="margin-top:10px;font-size:12px;padding:8px 16px">Study anyway →</button>`;
+    }
   }
   cta=`<div class="bab-card"><div class="bab-text">${babText}</div><div class="bab ${babCls}" onclick="${babClick}">${BAB_SVG}</div></div>`;
   // The fill vessel: a small lantern that fills with light as L1 + L1Q (words "in play") approach the target.
@@ -2388,7 +2397,22 @@ function SA(aa){
 }
 
 // ── REVIEW SETUP ──
-function ORS(){el=todaysPlan();V("review-setup");}
+// Open Review Setup. On a normal day it starts from today's plan. If nothing in
+// today's plan is due, it starts with every level that still has words left so
+// you can just press start — you can always add or drop levels yourself.
+function ORS(){
+  includeDone=false;
+  const plan=todaysPlan(),ws=bw();
+  const dueToday=ws.some(w=>plan.has(w.leitnerLevel)&&lvi(w.leitnerLevel).r&&!heldToday(w));
+  if(dueToday)el=plan;
+  else{
+    const avail=new Set(RO.filter(id=>ws.some(w=>w.leitnerLevel===id&&!heldToday(w))));
+    el=avail.size?avail:plan;
+  }
+  el.add("L1"); // always runs, always last
+  V("review-setup");
+}
+function setIncludeDone(on){includeDone=!!on;R();}
 function rRS(){
   const words=bw();
   const plan=todaysPlan();
@@ -2396,7 +2420,7 @@ function rRS(){
     const lv=lvi(id);
     const inBox=words.filter(w=>w.leitnerLevel===id);
     const h=inBox.filter(heldToday).length; // already done today
-    const c=inBox.length-h;                 // what's actually left to review
+    const c=includeDone?inBox.length:inBox.length-h; // what will actually be reviewed
     const on=el.has(id);
     const locked=id==="L1"; // L1 always runs, always last — can't be turned off
     const scheduled=plan.has(id);
@@ -2405,12 +2429,13 @@ function rRS(){
       <div class="tp" style="background:${on?lv.c:"rgba(255,255,255,.1)"}"><div class="tk" style="left:${on?"17":"3"}px"></div></div>
       <div style="flex:1"><div style="font-size:14px;font-weight:600;color:${on?lv.c:"#8DB5A5"}">${lv.l}</div>
       <div style="font-size:11px;color:#8DB5A5;margin-top:1px">${subText}</div></div>
-      <div style="text-align:right"><div style="font-size:13px;color:${c>0?lv.c:"#8DB5A5"};font-weight:600">${c} word${c!==1?"s":""}</div>${h?`<div style="font-size:10px;color:#8DB5A5;margin-top:1px">${h} done today</div>`:""}</div></div>`;
+      <div style="text-align:right"><div style="font-size:13px;color:${c>0?lv.c:"#8DB5A5"};font-weight:600">${c} word${c!==1?"s":""}</div>${h?`<div style="font-size:10px;color:#8DB5A5;margin-top:1px">${h} done today${includeDone?" · included":""}</div>`:""}</div></div>`;
   }).join("");
   return`<div style="text-align:left;margin-bottom:14px">
     <button onclick="V('home')" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:13px;padding:0">← Back</button></div>
   <div style="font-family:'Mirza','Amiri',serif;direction:rtl;font-size:38px;color:#D9B45E;text-align:center;margin-bottom:6px">مراجعة</div>
-  <div style="color:#8DB5A5;font-size:13px;text-align:center;margin-bottom:18px">${DN[new Date().getDay()]} — steps run ${RO.filter(id=>el.has(id)).map(id=>lvi(id).l).join(" → ")}</div>
+  <div style="color:#8DB5A5;font-size:13px;text-align:center;margin-bottom:${words.some(w=>plan.has(w.leitnerLevel)&&lvi(w.leitnerLevel).r&&!heldToday(w))?18:6}px">${DN[new Date().getDay()]} — steps run ${RO.filter(id=>el.has(id)).map(id=>lvi(id).l).join(" → ")}</div>
+  ${words.some(w=>plan.has(w.leitnerLevel)&&lvi(w.leitnerLevel).r&&!heldToday(w))?"":`<div style="color:#8DB5A5;font-size:11px;text-align:center;margin-bottom:18px;line-height:1.5">Nothing is due on today's plan, so this is an extra session — every level with words left is switched on. Turn levels on or off below.</div>`}
   ${sh("Select Levels")}${togs}
   <div style="height:14px"></div>
   ${(()=>{
@@ -2427,7 +2452,14 @@ function rRS(){
     const dialectsHere=["All",...new Set(poolForLevels.map(w=>w.dialect))];
     const typesHere=["All",...new Set(poolForLevels.map(w=>w.wordType))];
     const verbsN=pool.filter(w=>w.wordType==="Verb").length;
-    return`${sh("Narrow It Down")}
+    // Opt-in: words already done today are normally skipped so nothing repeats
+    // within a day. For an extra session you can bring them back.
+    const heldSel=poolForLevels.filter(heldToday).length;
+    const doneToggle=heldSel?`<label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:12px 14px;margin-bottom:16px">
+      <input type="checkbox" ${includeDone?"checked":""} onchange="setIncludeDone(this.checked)" style="width:16px;height:16px;accent-color:#D9B45E;cursor:pointer;flex-shrink:0;margin-top:2px"/>
+      <div><div style="font-size:12px;color:#EEE8D5">Include the ${heldSel} word${heldSel!==1?"s":""} I already did today</div>
+      <div style="font-size:10px;color:#8DB5A5;margin-top:2px;line-height:1.5">Normally skipped so you never see a word twice in one day. If you rate them again they'll move boxes again.</div></div></label>`:"";
+    return`${doneToggle}${sh("Narrow It Down")}
     <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Dialect</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${dialectsHere.map(d=>pill(d,df===d,`setSessionDialect('${d}')`)).join("")}</div>
     <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Word Type</div>
