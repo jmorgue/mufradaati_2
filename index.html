@@ -377,27 +377,32 @@ async function promoteFromVault(ids,target){
   }
   R();
 }
-// Shared mover for the Reserves-standard actions below (Fill Level 1 / Add N).
-// Both send straight into L1 (not L1Q), and both remember enough to Undo.
-async function moveWordsFromVaultToL1(ids){
+// Where Fill / Add N send Vault words: the L1 Queue (default — they wait until you
+// release them) or straight into Level 1. Remembered on this device.
+function vaultDest(){return gLS("mufradat-vault-dest")==="L1"?"L1":"L1Q";}
+function setVaultDest(d){sLS("mufradat-vault-dest",d==="L1"?"L1":"L1Q");R();}
+// Shared mover for the Reserves-standard actions below (Fill / Add N); both
+// remember enough to Undo.
+async function moveWordsFromVault(ids){
+  const dest=vaultDest(),destName=lvi(dest).l;
   const now=Date.now();
   vaultUndo={ids:ids.slice()};
   ids.forEach((id,i)=>{
     const cur=prog[id]||{};
-    prog[id]={...cur,leitnerLevel:"L1",nextReview:now,queuedAt:now+i};
+    prog[id]={...cur,leitnerLevel:dest,nextReview:now,queuedAt:now+i};
   });
   saveProgLocal();
   const moved=ids.map(id=>uw.find(w=>w.id===id)).filter(Boolean);
   const needing=moved.filter(w=>!(w.example||"").trim()).length;
   if(needing){
-    toast(`${ids.length} → Level 1 · writing ${needing} example${needing!==1?"s":""}…`);
+    toast(`${ids.length} → ${destName} · writing ${needing} example${needing!==1?"s":""}…`);
     R();
     const n=await fillExamples(moved);
     await saveProgressToDB();
-    toast(`${ids.length} word${ids.length!==1?"s":""} → Level 1${n?` · ${n} example${n!==1?"s":""} added`:""} ✓ — Undo available`);
+    toast(`${ids.length} word${ids.length!==1?"s":""} → ${destName}${n?` · ${n} example${n!==1?"s":""} added`:""} ✓ — Undo available`);
   }else{
     await saveProgressToDB();
-    toast(`${ids.length} word${ids.length!==1?"s":""} → Level 1 ✓ — Undo available`);
+    toast(`${ids.length} word${ids.length!==1?"s":""} → ${destName} ✓ — Undo available`);
   }
   R();
 }
@@ -423,22 +428,22 @@ async function fillLevel1(){
   const pool=vaultWords();
   if(!pool.length){toast("Vault is empty","#D9B45E");return;}
   const take=vaultPickOrder(pool,need);
-  if(!confirm(`Move ${take.length} word(s) from the Vault into Level 1?\n\n`+
+  if(!confirm(`Move ${take.length} word(s) from the Vault into ${lvi(vaultDest()).l}?\n\n`+
     take.slice(0,15).map(w=>"  • "+w.arabic+" — "+w.english).join("\n")+
     (take.length>15?`\n  …and ${take.length-15} more`:"")))return;
-  await moveWordsFromVaultToL1(take.map(w=>w.id));
+  await moveWordsFromVault(take.map(w=>w.id));
 }
-// Add N: move exactly N words from the Vault into Level 1, same pick order,
+// Add N: move exactly N words from the Vault into the chosen destination, same pick order,
 // ignoring the target entirely.
 async function addNFromVault(){
   const pool=vaultWords();
   if(!pool.length){toast("Vault is empty","#D9B45E");return;}
   const n=Math.max(1,Math.min(parseInt(vaultRandomN,10)||10,pool.length));
   const take=vaultPickOrder(pool,n);
-  if(!confirm(`Move ${take.length} word(s) from the Vault into Level 1?\n\n`+
+  if(!confirm(`Move ${take.length} word(s) from the Vault into ${lvi(vaultDest()).l}?\n\n`+
     take.slice(0,15).map(w=>"  • "+w.arabic+" — "+w.english).join("\n")+
     (take.length>15?`\n  …and ${take.length-15} more`:"")))return;
-  await moveWordsFromVaultToL1(take.map(w=>w.id));
+  await moveWordsFromVault(take.map(w=>w.id));
 }
 function toggleVaultSelect(id){
   if(vaultSelected.has(id))vaultSelected.delete(id);
@@ -1803,7 +1808,7 @@ function rH(){
     const n=Math.max(1,Math.min(parseInt(vaultRandomN,10)||10,vc));
     return`<div style="display:flex;gap:8px;margin-bottom:8px">
       <button onclick="GL('V')" style="flex:1;padding:12px;background:rgba(141,181,165,0.10);border:1px solid rgba(141,181,165,0.35);border-radius:10px;color:#8DB5A5;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;text-align:left;padding-left:16px">🗄 Vault — ${vc} word${vc!==1?"s":""} waiting</button>
-      <button onclick="addNFromVault()" title="Add ${n} word(s) from the Vault into Level 1" style="padding:12px 16px;background:rgba(217,180,94,0.10);border:1px solid rgba(217,180,94,0.35);border-radius:10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;flex-shrink:0">+${n} →</button>
+      <button onclick="addNFromVault()" title="Add ${n} word(s) from the Vault into ${lvi(vaultDest()).l}" style="padding:12px 16px;background:rgba(217,180,94,0.10);border:1px solid rgba(217,180,94,0.35);border-radius:10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;flex-shrink:0">+${n} →</button>
     </div>`;
   })()}
   ${masteredCount>0?`<button onclick="V('bonus-config')" style="width:100%;padding:12px;background:rgba(240,212,138,0.08);border:1px solid rgba(240,212,138,0.3);border-radius:10px;color:#F0D48A;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;margin-bottom:8px">⭐ Bonus Drill — Mastered Words (${masteredCount})</button>`:""}
@@ -1845,22 +1850,30 @@ function rVault(tabs){
 
   ${vaultUndo?`<button onclick="undoVaultMove()" style="width:100%;padding:10px;margin-bottom:12px;background:rgba(217,180,94,0.1);border:1px solid rgba(217,180,94,0.4);border-radius:10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">↩ Undo last move (${vaultUndo.ids.length} word${vaultUndo.ids.length!==1?"s":""} → Vault)</button>`:""}
 
+  <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.22);border-radius:12px;padding:12px 16px;margin-bottom:12px">
+    <div style="font-size:10px;color:#8DB5A5;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Send Vault words to</div>
+    <div style="display:flex;gap:6px">
+      ${["L1Q","L1"].map(d=>{const on=vaultDest()===d;return`<button onclick="setVaultDest('${d}')" style="flex:1;padding:9px 6px;background:${on?"rgba(217,180,94,0.15)":"transparent"};border:1px solid ${on?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:8px;color:${on?"#D9B45E":"#8DB5A5"};cursor:pointer;font-family:inherit;font-size:12px;font-weight:${on?"600":"400"}">${lvi(d).l}</button>`;}).join("")}
+    </div>
+    <div style="font-size:10px;color:#8DB5A5;margin-top:8px;line-height:1.5">${vaultDest()==="L1Q"?"They wait in the L1 Queue — not quizzed — until you release them into Level 1.":"They go straight into Level 1 and are quizzed in your next session."}</div>
+  </div>
+
   <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.22);border-radius:12px;padding:15px 16px;margin-bottom:12px">
-    <div style="font-size:10px;color:#8DB5A5;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Fill Level 1</div>
+    <div style="font-size:10px;color:#8DB5A5;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Fill to target → ${lvi(vaultDest()).l}</div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <span style="font-size:12px;color:#8DB5A5">In play: <span style="color:#EEE8D5;font-weight:600">${inPlay}</span> / ${wt} target</span>
       <span style="font-size:11px;color:${fillNeed?"#D9B45E":"#8DB5A5"}">${fillNeed?`needs ${fillNeed}`:"at target"}</span>
     </div>
-    <button onclick="fillLevel1()" class="btn1" style="width:100%;justify-content:center;font-size:13px;padding:10px 14px" ${fillNeed?"":"disabled"}>▶ Fill Level 1 (${Math.min(fillNeed,all.length)})</button>
+    <button onclick="fillLevel1()" class="btn1" style="width:100%;justify-content:center;font-size:13px;padding:10px 14px" ${fillNeed?"":"disabled"}>▶ Fill to target (${Math.min(fillNeed,all.length)})</button>
   </div>
 
   <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.22);border-radius:12px;padding:15px 16px;margin-bottom:12px">
-    <div style="font-size:10px;color:#8DB5A5;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Add N to Level 1</div>
+    <div style="font-size:10px;color:#8DB5A5;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Add N → ${lvi(vaultDest()).l}</div>
     <div style="display:flex;gap:8px;align-items:center">
       <input id="vault-n" type="number" min="1" max="${all.length}" value="${vaultRandomN}"
         oninput="vaultRandomN=this.value"
         style="width:74px;background:rgba(255,255,255,.04);border:1px solid rgba(217,180,94,.25);border-radius:8px;padding:9px 10px;color:#EEE8D5;font-family:inherit;font-size:14px;text-align:center"/>
-      <button onclick="addNFromVault()" class="btn1" style="flex:1;justify-content:center;font-size:13px;padding:10px 14px">▶ Add ${Math.max(1,Math.min(parseInt(vaultRandomN,10)||10,all.length))} to Level 1</button>
+      <button onclick="addNFromVault()" class="btn1" style="flex:1;justify-content:center;font-size:13px;padding:10px 14px">▶ Add ${Math.max(1,Math.min(parseInt(vaultRandomN,10)||10,all.length))} to ${lvi(vaultDest()).l}</button>
     </div>
     <div style="font-size:10px;color:#8DB5A5;margin-top:8px;line-height:1.5">Priority-starred words first, then oldest-added — ignores the Level 1 target.</div>
   </div>
