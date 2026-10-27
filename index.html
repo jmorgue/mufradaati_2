@@ -480,31 +480,235 @@ function selectAllFilteredVault(){
   R();
 }
 
-// ── DEDUP ──
+// ═══ Duplicate detection ════════════════════════════════════════════
+// ONE matcher for both jobs: warning you before you ADD a repeat, and finding
+// repeats already in the deck. It compares words by headword and meaning, not
+// by exact text, so it catches the usual ways the same word arrives twice:
+//   • a different case ending      كِتَابٌ / كِتَابُ
+//   • the definite article         الكِتَاب / كِتَاب
+//   • ى vs ي, tatweel, shadda order
+//   • a verb with / without its preposition, or with a plural attached
+//   • the AI calling it a Noun one day and an Adjective the next
+// It still NEVER merges words that differ only in their vowels (عِلْم "science"
+// vs عَلَم "flag", both reduce to the same bare letters): when both cards are
+// vowelled, the vowels have to agree.
+const DUP_STOP=new Set("to the a an of be is are in on for with and or one something someone somebody it that this by at from as into".split(" "));
+function dupStem(t){return t.replace(/(ing|ed|es|s)$/,"");}
+function engTokens(s){
+  const out=new Set();
+  String(s||"").toLowerCase().replace(/\([^)]*\)/g," ").split(/[^a-z]+/).forEach(t=>{
+    if(t.length<3||DUP_STOP.has(t))return;
+    out.add(dupStem(t));
+  });
+  return out;
+}
+function engOverlap(a,b){for(const t of a)if(b.has(t))return true;return false;}
+// Bare letters of one headword: no vowels/tatweel, one alef, ى=ي, no article.
+function dupSkeleton(s){
+  let t=String(s||"").replace(/[ً-ٰٟـ]/g,"").replace(/[أإآٱ]/g,"ا").replace(/ى/g,"ي").replace(/\s+/g," ").trim();
+  if(/^ال.{3,}$/.test(t))t=t.slice(2);
+  return t;
+}
+// Same, but keeping the vowels that make a word that word (not tanwin, sukun
+// or the case ending on the last letter, which are grammar, not identity).
+function dupVowelKey(s){
+  let t=String(s||"").replace(/ـ/g,"").replace(/[أإآٱ]/g,"ا").replace(/ى/g,"ي")
+    .replace(/[ً-ٍْٰ]/g,"")
+    .replace(/([َُِ])ّ/g,"ّ$1")
+    .replace(/\s+/g," ").trim();
+  const m=t.match(/^ا[َُِ]?ل/);
+  if(m){const rest=t.slice(m[0].length);if(rest.replace(/[ً-ٰٟ]/g,"").length>=3)t=rest;}
+  return t.replace(/[َُِ]$/,"");
+}
+const dupCache=new WeakMap();
+function dupEntry(w){
+  const c=dupCache.get(w);
+  if(c&&c.a===w.arabic&&c.e===w.english&&c.t===w.wordType)return c;
+  const base=verbBase(w.arabic)||String(w.arabic||"");
+  const head=(base.split("·")[0]||"").trim();
+  const e={a:w.arabic,e:w.english,t:w.wordType,
+    full:normArabic(base),                       // whole entry, vowels stripped, preposition ignored
+    sk:dupSkeleton(head),vk:dupVowelKey(head),diac:/[َ-ّ]/.test(head),
+    eng:engTokens(w.english),type:(w.wordType||"").toLowerCase()};
+  dupCache.set(w,e);
+  return e;
+}
+// How sure are we that a and b are the same card?
+//   3 identical   — the same entry (vowels agree if both are vowelled)
+//   2 same word   — same headword and the meanings overlap (or one has none)
+//   1 maybe       — same spelling and type but the meanings differ: could be
+//                   two senses of one word, so it's never deleted by default
+//   0 different
+function dupTier(a,b){
+  if(!a.sk||a.sk!==b.sk)return 0;
+  if(a.diac&&b.diac&&a.vk!==b.vk)return 0;       // both vowelled and they disagree: different words
+  const oneBare=a.diac!==b.diac;                 // only one side has its vowels
+  const sameType=a.type===b.type;
+  const ov=engOverlap(a.eng,b.eng),noEng=!a.eng.size||!b.eng.size;
+  // The meanings agree (or one side has none to compare, and the type matches):
+  // identical text is "identical", anything else with the same headword is "same word".
+  if(ov||(noEng&&sameType))return(!oneBare&&a.full&&a.full===b.full)?3:2;
+  // Same spelling but the meanings differ. Same type = maybe two senses of one
+  // word (kept by default); different type = simply different words,
+  // like ذَهَبَ "to go" and ذَهَبٌ "gold".
+  return sameType?1:0;
+}
+// Does this candidate already exist in the deck? Returns the existing card or null.
+function findExistingWord(cand,pool){
+  const words=pool||bw();
+  if(!cand||!cand.arabic)return null;
+  const ce=dupEntry(cand);
+  if(!ce.sk)return null;
+  return words.find(w=>w&&w.arabic&&dupTier(ce,dupEntry(w))>=1)||null;
+}
+// Gate for every manual add path: refuse a repeat of the same word; if it only
+// shares its spelling (a different meaning), ask first. true = go ahead and add.
+function dupGate(cand){
+  const dup=findExistingWord(cand,bw());
+  if(!dup)return true;
+  const lvl=lvi(dup.leitnerLevel).l;
+  if(dupTier(dupEntry(cand),dupEntry(dup))>=2){toast(`Already in ${lvl}`,"#D9B45E");return false;}
+  return confirm(`"${dup.arabic}" (${dup.english||"no meaning saved"}) is already in ${lvl}, with a different meaning.\n\nAdd this one as well?`);
+}
 // Level order from lowest to highest
 const LEVEL_ORDER = ["V","L1Q","L1","L2A","L2B","L3Q","L3","L4Q","L4","L5A","L5B","M"];
 function levelRank(id){return LEVEL_ORDER.indexOf(id);}
-
-// Find exact duplicates (same text after diacritic-stripping). Read-only.
-function findDuplicateGroups(){
-  const seen={};
-  uw.forEach(w=>{
-    const key=normArabic(w.arabic);
-    if(!key)return;
-    (seen[key]=seen[key]||[]).push(w);
-  });
-  return Object.entries(seen)
-    .filter(([,g])=>g.length>1)
-    .map(([key,g])=>({
-      key,
-      words:g.slice().sort((a,b)=>{
-        const la=mig(prog[a.id]?.leitnerLevel||a.leitnerLevel||"V");
-        const lb=mig(prog[b.id]?.leitnerLevel||b.leitnerLevel||"V");
-        const r=levelRank(lb)-levelRank(la);
-        return r!==0?r:(b.createdAt||0)-(a.createdAt||0);
-      })
-    }));
+function levelOf(w){return mig(prog[w.id]?.leitnerLevel||w.leitnerLevel||"V");}
+// Which copy to keep: the one furthest along, then the most complete, then the oldest.
+function dupKeepOrder(a,b){
+  const r=levelRank(levelOf(b))-levelRank(levelOf(a));if(r)return r;
+  const ex=((b.example||"").trim()?1:0)-((a.example||"").trim()?1:0);if(ex)return ex;
+  const forms=verbSegs(b.arabic).length-verbSegs(a.arabic).length;if(forms)return forms;
+  return(a.createdAt||0)-(b.createdAt||0);
 }
+// Every group of cards that look like the same word. Read-only.
+// Strongest links are joined first, so a group's confidence is its weakest
+// link that was actually needed to connect it.
+function findDuplicateGroups(){
+  const buckets={};
+  uw.forEach(w=>{if(!w||!w.arabic)return;const e=dupEntry(w);if(e.sk)(buckets[e.sk]=buckets[e.sk]||[]).push({w,e});});
+  const groups=[];
+  Object.values(buckets).forEach(list=>{
+    if(list.length<2)return;
+    const edges=[];
+    for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++){const t=dupTier(list[i].e,list[j].e);if(t)edges.push([t,i,j]);}
+    if(!edges.length)return;
+    edges.sort((x,y)=>y[0]-x[0]);
+    const parent=list.map((_,i)=>i),weak=list.map(()=>3);
+    const find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+    edges.forEach(([t,i,j])=>{
+      const a=find(i),b=find(j);if(a===b)return;
+      parent[b]=a;weak[a]=Math.min(weak[a],weak[b],t);
+    });
+    const comps={};
+    list.forEach((x,i)=>{(comps[find(i)]=comps[find(i)]||[]).push(x.w);});
+    Object.entries(comps).forEach(([root,ws])=>{
+      if(ws.length<2)return;
+      groups.push({key:list[0].e.sk,conf:weak[root],words:ws.sort(dupKeepOrder)});
+    });
+  });
+  return groups.sort((a,b)=>b.conf-a.conf||b.words.length-a.words.length);
+}
+
+// Deduplication is MANUAL and CONFIRMED. It used to run automatically on every
+// login and delete straight from Supabase — combined with an over-broad
+// normalizer that cost real vocabulary. It will not run unattended again: you
+// see every group, choose the card to keep, and a snapshot is taken first.
+let dupReview=null; // {groups,filter,shown,scope}
+const DUP_LABEL={3:["✓ Identical","#5FD3A0"],2:["◐ Same word","#D9B45E"],1:["? Maybe different meaning","#8DB5A5"]};
+function startDupReview(scope){
+  const all=findDuplicateGroups();
+  const groups=all.filter(g=>scope!=="V"||g.words.some(w=>levelOf(w)==="V")).map((g,i)=>({
+    id:i,conf:g.conf,words:g.words,keep:g.words[0].id,include:g.conf>=2}));   // "maybe" groups start unticked
+  if(!groups.length){toast("No duplicates found ✓");return;}
+  const first=[3,2,1].find(c=>groups.some(g=>g.conf===c));
+  dupReview={groups,filter:first,shown:25,scope:scope||"all"};
+  V("dup-review");
+}
+function dupSetFilter(c){dupReview.filter=c;dupReview.shown=25;R();}
+function dupMore(){dupReview.shown+=25;R();}
+function dupToggle(gid){const g=dupReview.groups.find(x=>x.id===gid);if(g){g.include=!g.include;R();}}
+function dupKeep(gid,wid){const g=dupReview.groups.find(x=>x.id===gid);if(g){g.keep=wid;R();}}
+function dupTickAll(on){dupReview.groups.forEach(g=>{if(g.conf===dupReview.filter)g.include=!!on;});R();}
+function dupCancel(){const s=dupReview&&dupReview.scope;dupReview=null;if(s==="V")GL("V");else V("settings");}
+async function applyDupReview(){
+  const r=dupReview;if(!r)return;
+  const chosen=r.groups.filter(g=>g.include);
+  const victimsN=chosen.reduce((n,g)=>n+g.words.length-1,0);
+  if(!chosen.length)return;
+  if(!confirm(`Delete ${victimsN} duplicate card${victimsN!==1?"s":""} across ${chosen.length} group${chosen.length!==1?"s":""}, keeping the one marked in each?\n\nWhat the kept card is missing (an example sentence, prepositions, a priority star) is copied over first. A backup snapshot is taken before anything is deleted (Settings ▸ Backup & Restore).`))return;
+  takeSnapshot("before-dedupe");
+  let removed=0;
+  for(const g of chosen){
+    const keep=uw.find(w=>w.id===g.keep);if(!keep)continue;
+    for(const cw of g.words){
+      if(cw.id===g.keep)continue;
+      const v=uw.find(w=>w.id===cw.id);if(!v)continue;
+      if(!(keep.example||"").trim()&&(v.example||"").trim())keep.example=v.example;
+      if(!(keep.english||"").trim()&&(v.english||"").trim())keep.english=v.english;
+      if(v.priority)keep.priority=true;
+      if(keep.wordType==="Verb"&&!hasPrep(keep)&&hasPrep(v)){
+        const seg=verbSegs(v.arabic).find(isPrepSeg);
+        if(seg){keep.arabic=verbBase(keep.arabic)+" · "+seg;if(v.prepCheck)keep.prepCheck=v.prepCheck;}
+      }
+      uw=uw.filter(x=>x.id!==v.id);
+      delete prog[v.id];
+      queuePendingDelete(v.id);
+      vaultSelected.delete(v.id);lvlSelected.delete(v.id);
+      removed++;
+    }
+  }
+  saveUW();saveProgLocal();
+  await flushPendingDeletes();
+  await saveProgressToDB();
+  const scope=r.scope;dupReview=null;
+  toast(`${removed} duplicate${removed!==1?"s":""} removed ✓`);
+  if(scope==="V")GL("V");else V("settings");
+}
+function rDupReview(){
+  const r=dupReview;
+  if(!r)return`<div style="text-align:center;padding:50px 0;color:#8DB5A5;font-size:13px">Nothing to review.</div>`;
+  const cnt=c=>r.groups.filter(g=>g.conf===c).length;
+  const tab=c=>{const on=r.filter===c;const[l,col]=DUP_LABEL[c];return`<button onclick="dupSetFilter(${c})" style="padding:6px 11px;border-radius:20px;border:1px solid ${on?col:"rgba(217,180,94,.18)"};background:${on?"rgba(217,180,94,.12)":"transparent"};color:${on?col:"#8DB5A5"};font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap">${l.replace(/^[^ ]+ /,"")} ${cnt(c)}</button>`;};
+  const list=r.groups.filter(g=>g.conf===r.filter);
+  const shown=list.slice(0,r.shown);
+  const sel=r.groups.filter(g=>g.include);
+  const del=sel.reduce((n,g)=>n+g.words.length-1,0);
+  const esc=s=>String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  const card=g=>{
+    const[lab,col]=DUP_LABEL[g.conf];
+    return`<div style="background:var(--panel);border:1px solid ${g.include?"rgba(240,122,122,.4)":"rgba(217,180,94,0.18)"};border-radius:12px;padding:12px 14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#EEE8D5"><input type="checkbox" ${g.include?"checked":""} onchange="dupToggle(${g.id})" style="width:17px;height:17px;accent-color:#D9B45E;cursor:pointer"/>Merge — delete ${g.words.length-1}, keep 1</label>
+        <span style="font-size:10px;color:${col};border:1px solid ${col};border-radius:20px;padding:2px 9px;white-space:nowrap">${lab}</span>
+      </div>
+      ${g.words.map(w=>{const lv=lvi(levelOf(w));const k=g.keep===w.id;
+        return`<label style="display:flex;align-items:flex-start;gap:9px;padding:8px 9px;margin-bottom:5px;border-radius:9px;cursor:pointer;background:${k?"rgba(95,211,160,.08)":"rgba(255,255,255,.02)"};border:1px solid ${k?"rgba(95,211,160,.4)":"rgba(255,255,255,.06)"}">
+          <input type="radio" name="dk${g.id}" ${k?"checked":""} onchange="dupKeep(${g.id},'${w.id}')" style="width:16px;height:16px;accent-color:#5FD3A0;cursor:pointer;margin-top:4px;flex-shrink:0"/>
+          <div style="flex:1;min-width:0">
+            <div style="font-family:'Amiri',serif;direction:rtl;text-align:right;font-size:19px;color:#F0D48A;line-height:1.5">${esc(w.arabic)}</div>
+            <div style="font-size:12px;color:#EEE8D5">${esc(w.english)||"<span style='color:#8DB5A5'>(no meaning)</span>"}</div>
+            <div style="font-size:10px;color:#8DB5A5;margin-top:2px"><span style="color:${lv.c}">${lv.l}</span> · ${w.wordType||""} · ${w.dialect||""}${(w.example||"").trim()?" · has example":""}${w.priority?" · ★":""}</div>
+          </div>
+          ${k?`<span style="font-size:10px;color:#5FD3A0;flex-shrink:0;margin-top:3px">keep</span>`:`<span style="font-size:10px;color:#F07A7A;flex-shrink:0;margin-top:3px">${g.include?"delete":""}</span>`}
+        </label>`;}).join("")}
+    </div>`;};
+  return`<div style="font-size:18px;font-weight:600;color:#D9B45E;margin-bottom:4px">Review duplicates${r.scope==="V"?" — Vault":""}</div>
+  <div style="font-size:12px;color:#8DB5A5;margin-bottom:14px;line-height:1.6">Cards that look like the same word. In each group the green one is kept — tap another to keep that one instead. Nothing is deleted until you press the button below, and a backup is taken first.
+    <strong style="color:#EEE8D5">Identical</strong> and <strong style="color:#EEE8D5">Same word</strong> groups start ticked; <strong style="color:#EEE8D5">Maybe different meaning</strong> groups share spelling but not meaning (like عَيْنٌ "eye" / "spring"), so they start unticked.</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${[3,2,1].filter(c=>cnt(c)).map(tab).join("")}</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <button class="btn2" onclick="dupTickAll(true)" style="font-size:11px;padding:6px 12px">Tick all in this tab</button>
+    <button class="btn2" onclick="dupTickAll(false)" style="font-size:11px;padding:6px 12px">Untick all in this tab</button>
+  </div>
+  ${shown.map(card).join("")}
+  ${list.length>shown.length?`<button class="btn2" onclick="dupMore()" style="width:100%;margin-bottom:12px">Show ${Math.min(25,list.length-shown.length)} more</button>`:""}
+  <div style="position:sticky;bottom:10px;display:flex;gap:8px;padding:10px;background:rgba(4,20,15,.92);border:1px solid rgba(217,180,94,.25);border-radius:12px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)">
+    <button class="btn1" onclick="applyDupReview()" ${sel.length?"":"disabled"} style="flex:1;justify-content:center;font-size:13px;padding:11px 14px">Delete ${del} duplicate${del!==1?"s":""} (${sel.length} group${sel.length!==1?"s":""})</button>
+    <button class="btn2" onclick="dupCancel()" style="font-size:12px;padding:11px 16px">Cancel</button>
+  </div>`;
+}
+
 
 // ── Safety snapshots ──────────────────────────────────────────────
 // A rolling local backup of the whole deck, taken whenever the deck shrinks
@@ -606,32 +810,6 @@ async function importDeck(input){
   saveUW();saveProgLocal();
   await saveProgressToDB();
   toast(`${missing.length} word${missing.length!==1?"s":""} restored ✓`);
-  R();
-}
-
-// Deduplication is MANUAL and CONFIRMED. It used to run automatically on every
-// login and delete straight from Supabase — combined with an over-broad
-// normalizer that cost real vocabulary. It will not run unattended again.
-async function removeDuplicates(){
-  const groups=findDuplicateGroups();
-  if(!groups.length){toast("No duplicates found ✓");return;}
-  const victims=groups.flatMap(g=>g.words.slice(1));
-  const preview=groups.slice(0,12)
-    .map(g=>"  • "+g.words.map(w=>w.arabic).join("   /   ")+"  → keeping “"+g.words[0].arabic+"”")
-    .join("\n");
-  const more=groups.length>12?`\n  …and ${groups.length-12} more group(s)`:"";
-  if(!confirm(
-    `Found ${groups.length} duplicate group(s). This will permanently delete ${victims.length} card(s), keeping the copy at the highest level in each group.\n\n${preview}${more}\n\nDelete them?`
-  ))return;
-  for(const w of victims){
-    uw=uw.filter(x=>x.id!==w.id);
-    delete prog[w.id];
-    queuePendingDelete(w.id);
-  }
-  saveUW();saveProgLocal();
-  await flushPendingDeletes();
-  await saveProgressToDB();
-  toast(`${victims.length} duplicate${victims.length!==1?"s":""} removed ✓`);
   R();
 }
 
@@ -989,21 +1167,6 @@ function headMatch(a,b){
   return normArabic(ha)===normArabic(hb);
 }
 
-// Does this candidate already exist in the deck? Returns the existing card or null.
-function findExistingWord(cand,pool){
-  const words=pool||bw();
-  const full=normArabic(cand.arabic);
-  const type=(cand.wordType||"").toLowerCase();
-  if(!full)return null;
-  return words.find(w=>{
-    // Same full entry, ignoring diacritics
-    if(normArabic(w.arabic)===full)return true;
-    // Same headword AND same part of speech. Requiring the wordType match is
-    // what keeps root-siblings apart: كَتَبَ (Verb) vs كُتُب (Noun).
-    if((w.wordType||"").toLowerCase()===type&&headMatch(w.arabic,cand.arabic))return true;
-    return false;
-  })||null;
-}
 
 // Split a freshly generated batch into what's new and what we already have,
 // also catching repeats inside the batch itself.
@@ -1652,7 +1815,7 @@ function R(){
     <div id="main"></div>
   </div>`;
   const m=document.getElementById("main");if(!m)return;
-  const map={home:rH,levels:rL,add:rA,apply:rApply,stats:rStats,root:rRoot,import:rI,settings:rSettings,"review-setup":rRS,review:rRV,"release-prompt":rReleasePrompt,"prep-review":rPrepReview,done:rD,"bonus-config":rBonusConfig,bonus:rBonus,"bonus-done":rBonusDone};
+  const map={home:rH,levels:rL,add:rA,apply:rApply,stats:rStats,root:rRoot,import:rI,settings:rSettings,"review-setup":rRS,review:rRV,"release-prompt":rReleasePrompt,"prep-review":rPrepReview,"dup-review":rDupReview,done:rD,"bonus-config":rBonusConfig,bonus:rBonus,"bonus-done":rBonusDone};
   m.innerHTML=(map[view]||rH)();
   // Refresh sync dot after every render — error/offline states must persist across re-renders
   setSyncDot(syncing);
@@ -1848,6 +2011,10 @@ function rVault(tabs){
     <div style="font-size:10px;color:#5E8677;margin-top:5px;line-height:1.5">Not reviewed, not scheduled. Cards are complete apart from example sentences, which get written automatically when a word leaves the Vault. Star a word to give it priority.</div>
   </div>
 
+  ${(()=>{const vd=findDuplicateGroups().filter(g=>g.words.some(w=>levelOf(w)==="V")).length;
+    return vd?`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;margin-bottom:12px;background:rgba(217,180,94,0.07);border:1px solid rgba(217,180,94,0.25);border-radius:10px">
+      <div style="font-size:12px;color:#EEE8D5;line-height:1.4"><strong style="color:#D9B45E">${vd}</strong> repeated word${vd!==1?"s":""} involve${vd===1?"s":""} Vault cards</div>
+      <button class="btn2" onclick="startDupReview('V')" style="font-size:11px;padding:6px 12px;flex-shrink:0">Review</button></div>`:"";})()}
   ${vaultUndo?`<button onclick="undoVaultMove()" style="width:100%;padding:10px;margin-bottom:12px;background:rgba(217,180,94,0.1);border:1px solid rgba(217,180,94,0.4);border-radius:10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">↩ Undo last move (${vaultUndo.ids.length} word${vaultUndo.ids.length!==1?"s":""} → Vault)</button>`:""}
 
   <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.22);border-radius:12px;padding:12px 16px;margin-bottom:12px">
@@ -2387,11 +2554,9 @@ function SA(aa){
   const w={id:uid(),arabic:ar.trim(),english:en.trim(),example:document.getElementById("fe")?.value||"",
     wordType:document.getElementById("ft")?.value||"Noun",dialect:document.getElementById("fd")?.value||"MSA",
     leitnerLevel:tl,nextReview:nrf(tl)||Date.now(),createdAt:Date.now()};
-  // Check for duplicate (tashkeel-insensitive). The preposition segment is
-  // ignored, so "كَتَبَ" matches a saved "كَتَبَ · … · + إِلَى".
-  const wNorm=normArabic(verbBase(w.arabic)||w.arabic);
-  const dupCheck=bw().find(x=>normArabic(verbBase(x.arabic)||x.arabic)===wNorm);
-  if(dupCheck){toast(`Already in ${lvi(dupCheck.leitnerLevel).l}`,"#D9B45E");return;}
+  // Same word already in the deck? (compared by headword and meaning, ignoring
+  // case endings, the article and the preposition segment)
+  if(!dupGate(w))return;
   // Verbs carry their prepositions. Use what was typed; otherwise look them up
   // in the background right after saving.
   if(w.wordType==="Verb"&&!hasPrep(w)){
@@ -3215,9 +3380,9 @@ function renderRootExpr(ex){
 
 function renderAddButtons(arabic, english, example, wordType){
   const words=bw();
-  const arNorm=normArabic(arabic);
-  const existing=words.find(w=>normArabic(w.arabic)===arNorm);
-  if(existing){
+  const cand={arabic,english,wordType};
+  const existing=findExistingWord(cand,words);
+  if(existing&&dupTier(dupEntry(cand),dupEntry(existing))>=2){
     return`<div style="font-size:11px;color:#F0D48A;padding:6px 0">✓ Already in ${lvi(existing.leitnerLevel).l}</div>`;
   }
   return`<div style="display:flex;gap:8px;margin-top:4px">
@@ -3229,9 +3394,7 @@ function renderAddButtons(arabic, english, example, wordType){
 
 function addRootWord(arabic, english, example, wordType, level){
   if(level==="L1Q"&&sessionWaitingBox())level=sessionWaitingBox(); // live session: waiting box for the current step
-  const arNorm=normArabic(verbBase(arabic)||arabic); // ignore the preposition segment when matching
-  const existing=bw().find(w=>normArabic(verbBase(w.arabic)||w.arabic)===arNorm);
-  if(existing){toast('Already in '+lvi(existing.leitnerLevel).l,'#D9B45E');return;}
+  if(!dupGate({arabic,english,wordType}))return;
   const w={id:uid(),arabic,english,example,wordType,dialect:'MSA',leitnerLevel:level,nextReview:nrf(level)||Date.now(),createdAt:Date.now()};
   uw.push(w);saveUW();prog[w.id]={leitnerLevel:level,nextReview:nrf(level)||Date.now(),queuedAt:Date.now()};saveProgressToDB();
   attachPrepsInBackground([w.id]);
@@ -3598,6 +3761,7 @@ Return ONLY valid JSON (no markdown, no newlines inside strings):
     }catch(e){console.warn("Card gen failed:",e);}
   }
 
+  if(!dupGate({arabic,english,wordType}))return; // this path used to add with no repeat check at all
   const w={id:uid(),arabic,english,example,wordType,dialect:applyDialect,leitnerLevel:level,nextReview:nrf(level)||Date.now(),createdAt:Date.now()};
   uw.push(w);saveUW();prog[w.id]={leitnerLevel:level,nextReview:nrf(level)||Date.now(),queuedAt:Date.now()};saveProgressToDB();
   attachPrepsInBackground([w.id]);
@@ -3722,10 +3886,11 @@ function rSettings(){
   ${sh("Duplicates")}
   <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:18px;margin-bottom:18px">
     ${(()=>{const g=findDuplicateGroups();
+      const n=c=>g.filter(x=>x.conf===c).length,vault=g.filter(x=>x.words.some(w=>levelOf(w)==="V")).length;
       return g.length
-        ?`<div style="font-size:11px;color:#8DB5A5;margin-bottom:12px;line-height:1.6">Found <strong style="color:#D9B45E">${g.length}</strong> group(s) of identical cards. You'll see exactly what would be deleted before anything happens.</div>
-          <button class="btn2" onclick="removeDuplicates()" style="font-size:13px;padding:10px 20px">Review duplicates</button>`
-        :`<div style="font-size:11px;color:#8DB5A5;line-height:1.6">No duplicates found. Only cards with identical Arabic text are ever matched — words sharing a root stay separate.</div>`;
+        ?`<div style="font-size:11px;color:#8DB5A5;margin-bottom:12px;line-height:1.6">Found <strong style="color:#D9B45E">${g.length}</strong> group${g.length!==1?"s":""} of repeated cards: <strong style="color:#5FD3A0">${n(3)} identical</strong> · <strong style="color:#D9B45E">${n(2)} same word</strong> · <span style="color:#EEE8D5">${n(1)} maybe a different meaning</span>${vault?` — ${vault} involve${vault===1?"s":""} the Vault`:""}. You choose which card to keep in each group, and nothing is deleted until you confirm.</div>
+          <button class="btn2" onclick="startDupReview()" style="font-size:13px;padding:10px 20px">Review duplicates</button>`
+        :`<div style="font-size:11px;color:#8DB5A5;line-height:1.6">No duplicates found. Cards are compared by headword and meaning — a different case ending, the article, or a verb with and without its preposition all count as the same word, but words that differ only in their vowels (عِلْم / عَلَم) stay separate.</div>`;
     })()}
   </div>
   ${sh("Account")}
