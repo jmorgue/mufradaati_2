@@ -194,6 +194,21 @@ const RESCUE_SHARE=0.3; // fraction of each session reserved for the rescue tier
 
 function sessionBudget(){const v=gLS("mufradat-session-budget");return v===null?null:v;}
 function setSessionBudget(n){sLS("mufradat-session-budget",n);R();}
+// Per-level session size: how many cards each level contributes to a session.
+// A level that's cut at its size simply hands over to the next level (the rest
+// of it waits for your next session). null = the whole level. A level with no
+// saved choice falls back to the old single "session size" so nothing changes
+// until you set one.
+const LEVEL_SIZES=[10,20,30,50];
+function levelSizesKey(){return"mufradat-level-sizes-"+(CU?CU.username:"");}
+function levelSize(id){const m=gLS(levelSizesKey())||{};return id in m?m[id]:sessionBudget();}
+function setLevelSize(id,n){const m=gLS(levelSizesKey())||{};m[id]=n;sLS(levelSizesKey(),m);R();}
+function customLevelSize(id){
+  const a=prompt("How many cards from this level per session?",levelSize(id)||"");
+  if(a===null)return;const n=parseInt(a,10);
+  if(!(n>0)){toast("Enter a number, like 25","#F07A7A");return;}
+  setLevelSize(id,n);
+}
 function prioritizeTypes(){const v=gLS("mufradat-prioritize-types");return v===null?true:!!v;}
 function setPrioritizeTypes(on){sLS("mufradat-prioritize-types",!!on);R();}
 // Dialect + word-type filter for the session about to start (Review Setup).
@@ -2604,11 +2619,15 @@ function rRS(){
     const locked=id==="L1"; // L1 always runs, always last — can't be turned off
     const scheduled=plan.has(id);
     const subText=scheduled?lv.s:`${lv.s} — extra (not on today's plan)`;
-    return`<div class="tr" onclick="${locked?"":`TL('${id}')`}" style="background:${on?`rgba(${rgb(lv.c)},0.1)`:"var(--panel)"};border:1px solid ${on?lv.c:"rgba(217,180,94,0.18)"};opacity:${on?1:.55};cursor:${locked?"default":"pointer"}">
+    const sz=levelSize(id);
+    const szChip=(label,val)=>{const a=val===sz;return`<button onclick="setLevelSize('${id}',${val===null?"null":val})" style="padding:5px 11px;border-radius:14px;border:1px solid ${a?lv.c:"rgba(217,180,94,.18)"};background:${a?`rgba(${rgb(lv.c)},0.18)`:"transparent"};color:${a?lv.c:"#8DB5A5"};font-size:11px;font-weight:${a?600:400};cursor:pointer;font-family:inherit">${label}</button>`;};
+    const sizes=sz&&!LEVEL_SIZES.includes(sz)?[...LEVEL_SIZES,sz].sort((a,b)=>a-b):LEVEL_SIZES;
+    const sizeRow=on?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:-2px 0 10px 4px"><span style="font-size:10px;color:#8DB5A5;letter-spacing:.08em;text-transform:uppercase;margin-right:2px">Per session</span>${sizes.map(n=>szChip(n,n)).join("")}${szChip("All",null)}<button onclick="customLevelSize('${id}')" title="Custom number" style="padding:5px 9px;border-radius:14px;border:1px solid rgba(217,180,94,.18);background:transparent;color:#8DB5A5;font-size:11px;cursor:pointer;font-family:inherit">✎</button></div>`:"";
+    return`<div><div class="tr" onclick="${locked?"":`TL('${id}')`}" style="background:${on?`rgba(${rgb(lv.c)},0.1)`:"var(--panel)"};border:1px solid ${on?lv.c:"rgba(217,180,94,0.18)"};opacity:${on?1:.55};cursor:${locked?"default":"pointer"}">
       <div class="tp" style="background:${on?lv.c:"rgba(255,255,255,.1)"}"><div class="tk" style="left:${on?"17":"3"}px"></div></div>
       <div style="flex:1"><div style="font-size:14px;font-weight:600;color:${on?lv.c:"#8DB5A5"}">${lv.l}</div>
       <div style="font-size:11px;color:#8DB5A5;margin-top:1px">${subText}</div></div>
-      <div style="text-align:right"><div style="font-size:13px;color:${c>0?lv.c:"#8DB5A5"};font-weight:600">${c} word${c!==1?"s":""}</div>${h?`<div style="font-size:10px;color:#8DB5A5;margin-top:1px">${h} done today${includeDone?" · included":""}</div>`:""}</div></div>`;
+      <div style="text-align:right"><div style="font-size:13px;color:${c>0?lv.c:"#8DB5A5"};font-weight:600">${c} word${c!==1?"s":""}</div>${h?`<div style="font-size:10px;color:#8DB5A5;margin-top:1px">${h} done today${includeDone?" · included":""}</div>`:""}</div></div>${sizeRow}</div>`;
   }).join("");
   return`<div style="text-align:left;margin-bottom:14px">
     <button onclick="V('home')" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:13px;padding:0">← Back</button></div>
@@ -2621,12 +2640,8 @@ function rRS(){
     const words=bw();
     const poolForLevels=words.filter(w=>el.has(w.leitnerLevel));
     const pool=poolForLevels.filter(sessionMatch);
-    const budget=sessionBudget();
+    const budget=RO.some(id=>el.has(id)&&levelSize(id)!==null)?1:null; // is any switched-on level capped?
     const prio=prioritizeTypes();
-    const chip=(label,val)=>{
-      const on=(val===null&&budget===null)||val===budget;
-      return`<button onclick="setSessionBudget(${val===null?"null":val})" style="flex:1;min-width:50px;padding:9px 4px;background:${on?"rgba(217,180,94,0.15)":"transparent"};border:1px solid ${on?"#D9B45E":"rgba(217,180,94,0.18)"};border-radius:8px;color:${on?"#D9B45E":"#8DB5A5"};cursor:pointer;font-family:inherit;font-size:12px;font-weight:${on?"600":"400"}">${label}</button>`;
-    };
     const pill=(label,active,handler)=>`<button onclick="${handler}" style="padding:6px 13px;border-radius:20px;border:1px solid ${active?"rgba(217,180,94,.5)":"rgba(217,180,94,.18)"};background:${active?"rgba(217,180,94,.15)":"transparent"};color:${active?"#D9B45E":"#8DB5A5"};font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap">${label}</button>`;
     const dialectsHere=["All",...new Set(poolForLevels.map(w=>w.dialect))];
     const typesHere=["All",...new Set(poolForLevels.map(w=>w.wordType))];
@@ -2644,10 +2659,7 @@ function rRS(){
     <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em;text-transform:uppercase;margin-bottom:7px">Word Type</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${typesHere.map(t=>pill(t,wtf===t,`setSessionWordType('${t}')`)).join("")}</div>
     ${sh("Session Size")}
-    <div style="font-size:11px;color:#8DB5A5;margin:-4px 0 10px;line-height:1.5">${budget===null?"Review everything in the selected levels.":`Up to ${budget} cards in total, highest level first. It stays on a level until that level is finished, then moves down — and if the size runs out mid-level, your next session picks up right there.`}</div>
-    <div style="display:flex;gap:6px;margin-bottom:10px">
-      ${SESSION_SIZES.map(n=>chip(n,n)).join("")}${chip("All",null)}
-    </div>
+    <div style="font-size:11px;color:#8DB5A5;margin:-4px 0 10px;line-height:1.5">${budget===null?"Every level you switched on runs in full.":`Each level gives up to its own number of cards (set under each level above), highest level first. A level with more words than its number hands over to the next one, and its leftover words wait for your next session — so every level moves every day.`}</div>
     <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:12px;padding:14px 16px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
         <span style="font-size:12px;color:#8DB5A5">${pool.length} word${pool.length!==1?"s":""}${df==="All"&&wtf==="All"?" across selected levels":` · ${[df,wtf].filter(v=>v!=="All").join(" · ")}`}${(()=>{const h=poolForLevels.filter(heldToday).length;return h?` · ${h} already done today (skipped)`:"";})()}</span>
@@ -2699,8 +2711,7 @@ function startSession(d){
     toast(done?`All caught up — the ${done} word${done!==1?"s":""} in these levels are done for today`:"Nothing to review in the selected levels","#D9B45E");
     return;
   }
-  const budget=sessionBudget();
-  sessionRemaining=(budget&&budget>0)?budget:null;stepCutShort=false;
+  sessionRemaining=null;stepCutShort=false; // sizes are per level now (see setupStep)
   rd=d;stepIdx=0;rr=[];fl=false;pendingRelease=null;sessionActive=true;
   setupStep();
 }
@@ -2709,12 +2720,13 @@ function setupStep(){
   const level=sessionSteps[stepIdx];
   stepRanBefore=stepRanToday(level); // had this level already been worked on earlier today?
   let pool=bw().filter(w=>w.leitnerLevel===level&&sessionMatch(w));
-  // Spend what's left of the session size on THIS level. If the level has more
-  // words than that, the cap ends the session here (stepCutShort) rather than
-  // sliding down to the next level and leaving this one half-done.
-  stepCutShort=sessionRemaining!==null&&pool.length>sessionRemaining;
+  // Each level brings up to ITS OWN size. If it has more words than that, only
+  // that many are drawn (stepCutShort) and the rest wait for the next session;
+  // the session then carries on to the next level, so every level moves daily.
+  const cap=levelSize(level);
+  stepCutShort=cap!==null&&cap>0&&pool.length>cap;
   if(stepCutShort){
-    const{picked}=buildSession(pool,sessionRemaining,prioritizeTypes());
+    const{picked}=buildSession(pool,cap,prioritizeTypes());
     pool=picked;
   }
   rq=pool.slice().sort(byOrder); // oldest-waiting first
@@ -2731,12 +2743,11 @@ function releaseAll(from,to){
 async function finishStep(){
   const level=sessionSteps[stepIdx];
   markStepRan(level); // this box has run today — releases into it now wait until tomorrow
-  // The session size ended this level before it was finished. Stay on it: no
-  // release prompt (it would refill a level you haven't completed) and no
-  // sliding down to the next level. The next session resumes this same level.
+  // This level's size ended it before it was finished: no release prompt (it
+  // would refill a level you haven't completed). The rest of the level waits
+  // for the next session; carry on down to the next level.
   if(stepCutShort){
-    await saveProgressToDB();
-    return endSession();
+    return advanceStep();
   }
   if(level==="L1"){
     // Always last. L1Q no longer clears itself — release it by hand from the
