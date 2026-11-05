@@ -3194,6 +3194,63 @@ function handleImportDragLeave(e){
   const dz=document.getElementById("img-drop");if(dz)dz.style.borderColor="rgba(217,180,94,0.35)";
 }
 
+// ── AI Import settings: which dialect the pasted text is in, and how the extracted
+// words are written up. Saved per user and reused; changing one never re-renders
+// the page, so a pasted text is never lost.
+const IMP_DIALECTS=[["auto","Auto-detect"],["MSA","MSA (Fusha)"],["Darija","Darija (Moroccan)"],["Egyptian","Masri (Egyptian)"],["Shaami","Shaami (Levantine)"],["Gulf","Gulf (Khaleeji)"]];
+const IMP_DEFAULTS={dialect:"auto",scope:"all",max:"0",diac:"full",verbs:"three",plural:true,gloss:"short",msa:false,translit:false};
+const IMP_DIALECT_NOTES={
+  MSA:"Modern Standard Arabic (Fusha).",
+  Darija:"Moroccan Arabic (Darija). Write each word the way Moroccans say it (e.g. بغيت، واخا، دابا، كنقول), not converted to MSA. Verb citation forms are the 3rd-person masculine past and the bare present stem, without aspect prefixes such as ك or كا.",
+  Egyptian:"Egyptian Arabic (Masri). Write each word the way Egyptians say it (e.g. عايز، دلوقتي، إزاي، مش), not converted to MSA. Verb citation forms are the 3rd-person masculine past and the bare present stem, without prefixes such as بـ or هـ.",
+  Shaami:"Levantine Arabic (Shaami: Syrian, Lebanese, Palestinian, Jordanian). Write each word the way Levantines say it (e.g. بدي، هلق، شو، كتير), not converted to MSA. Verb citation forms are the 3rd-person masculine past and the bare present stem, without prefixes such as بـ, عم or رح.",
+  Gulf:"Gulf Arabic (Khaleeji). Write each word the way Gulf speakers say it (e.g. أبغى، وايد، شلونك، الحين), not converted to MSA. Verb citation forms are the 3rd-person masculine past and the bare present stem, without aspect prefixes."
+};
+function impOptsKey(){return"mufradat-import-opts-"+(CU?CU.username:"");}
+function impOpts(){return{...IMP_DEFAULTS,...(gLS(impOptsKey())||{})};}
+let importOptsOpen=false;
+function setImpOpt(k,v){const o=impOpts();o[k]=v;sLS(impOptsKey(),o);}
+function importOptionsText(o){
+  const L=[];
+  if(o.dialect==="auto")L.push(`The text may be in MSA or any Arabic dialect (Darija, Egyptian/Masri, Shaami, Gulf…). Work out the dialect of each word and set "dialect" to match. Write dialectal words the way they are spoken instead of converting them to MSA.`);
+  else L.push(`The text is in ${IMP_DIALECT_NOTES[o.dialect]||o.dialect} Set "dialect" to "${o.dialect}" for every word, except a word that is plainly MSA or borrowed, which gets its true label.`);
+  L.push("If any of the text is written in Latin letters (Arabizi or chat-style), read it as that dialect and give the Arabic-script spelling.");
+  L.push({all:"Extract the vocabulary worth studying; skip proper nouns, numerals and basic function words unless they are genuinely useful.",
+    words:"Extract single words only (nouns, verbs, adjectives, adverbs). Do not return multi-word phrases.",
+    phrases:`Extract ONLY set phrases, idioms and common expressions (wordType "Phrase"). Do not return single words.`}[o.scope]||"");
+  if(+o.max>0)L.push(`Return at most ${+o.max} entries: the most useful ones for a learner.`);
+  L.push(o.diac==="none"?"Write Arabic without diacritics, as it appears in the text (no tashkeel).":"Include full diacritics (tashkeel) on every Arabic word.");
+  L.push({three:`For verbs use "past · present · masdar" (leave the masdar out if the dialect does not normally use one).`,
+    two:`For verbs use "past · present" only, with no masdar.`,
+    one:`For verbs give only the past tense (3rd-person masculine singular).`}[o.verbs]);
+  L.push(o.plural?`For nouns include the plural as "singular · plural" when you know it.`:`Give nouns in the singular only, with no plural.`);
+  L.push(o.gloss==="notes"?`In "english" give the meaning plus a short usage note in parentheses (register, region, or how it differs from MSA).`:`Keep "english" to a short, plain gloss.`);
+  if(o.msa)L.push(`When a word differs from its MSA equivalent, add the MSA word at the end of "english" as "(MSA: …)" in Arabic script with diacritics.`);
+  if(o.translit)L.push(`Add a simple Latin transliteration at the end of "english" in square brackets, e.g. "to want [ʿāyiz]".`);
+  L.push(`Leave "example" as an empty string — example sentences are added later, only for words that enter active review.`);
+  return L.filter(Boolean).join("\n");
+}
+function importSettingsHtml(){
+  const o=impOpts();
+  const sel=(k,opts)=>`<select class="inp" style="cursor:pointer;font-size:13px;padding:9px 12px" onchange="setImpOpt('${k}',this.value)">${opts.map(([v,l])=>`<option value="${v}"${String(o[k])===v?" selected":""}>${l}</option>`).join("")}</select>`;
+  const chk=(k,l)=>`<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#EEE8D5;cursor:pointer;margin-top:8px"><input type="checkbox" ${o[k]?"checked":""} onchange="setImpOpt('${k}',this.checked)" style="width:15px;height:15px;accent-color:#D9B45E"/>${l}</label>`;
+  const fld=(l,body)=>`<div style="margin-bottom:12px"><label class="lbl">${l}</label>${body}</div>`;
+  return`<div style="background:var(--panel);border:1px solid rgba(217,180,94,0.22);border-radius:14px;padding:16px;margin-bottom:12px">
+    ${fld("What dialect is the text?",sel("dialect",IMP_DIALECTS))}
+    <details ${importOptsOpen?"open":""} ontoggle="importOptsOpen=this.open">
+      <summary style="cursor:pointer;font-size:12px;color:#D9B45E;font-weight:600;margin-bottom:12px">How words are extracted &amp; written</summary>
+      ${fld("What to pull out",sel("scope",[["all","Everything worth learning"],["words","Single words only"],["phrases","Phrases &amp; expressions only"]]))}
+      ${fld("Most words per extraction",sel("max",[["0","No limit"],["15","15"],["30","30"],["50","50"]]))}
+      ${fld("Diacritics (tashkeel)",sel("diac",[["full","Full vowel marks"],["none","None — as written in the text"]]))}
+      ${fld("Verbs written as",sel("verbs",[["three","past · present · masdar"],["two","past · present"],["one","past only"]]))}
+      ${fld("Meaning (English)",sel("gloss",[["short","Short gloss"],["notes","With a usage note (register, region)"]]))}
+      ${chk("plural","Include noun plurals")}
+      ${chk("msa","Add the MSA equivalent to the meaning")}
+      ${chk("translit","Add a transliteration to the meaning")}
+    </details>
+  </div>`;
+}
+
 async function RI(){
   if(!navigator.onLine){toast("AI features need a connection","#D9B45E");return;}
   const text=(document.getElementById("it")?.value||"").trim();
@@ -3205,9 +3262,10 @@ async function RI(){
   const btn=document.getElementById("ib");
   if(btn){btn.textContent=hasImages?"⏳ Reading image…":"⏳ Extracting…";btn.disabled=true;}
 
+  const opts=impOpts();
   const schema=`Return ONLY a valid JSON array, no markdown fences and no commentary. Each object: arabic, english, example (string or ""), wordType (Noun/Verb/Adjective/Adverb/Phrase/Preposition/Conjunction/Other), dialect (MSA/Darija/Shaami/Egyptian/Gulf/Other).
 
-For nouns include the plural as "singular · plural" in the arabic field when you know it. For verbs use "past · present · masdar". Include full diacritics (tashkeel) on every Arabic word. Leave "example" as an empty string — example sentences are added later, only for words that enter active review.
+${importOptionsText(opts)}
 
 ${VERB_PREP_RULES}`;
 
@@ -3233,6 +3291,8 @@ ${VERB_PREP_RULES}`;
       const cleaned=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(cleaned);
       const list=Array.isArray(parsed)?parsed:[];
+      // A dialect you chose is authoritative whenever the model returns nothing usable for it.
+      if(opts.dialect!=="auto")list.forEach(c=>{if(c&&(!c.dialect||!DL.includes(c.dialect)||c.dialect==="Other"))c.dialect=opts.dialect;});
       // Filter against the deck AND against repeats inside this batch
       const {fresh,skipped}=partitionNewCards(applyVerbPreps(list));
       bulkSource="import";
@@ -3297,6 +3357,7 @@ function rI(){
     <div style="font-size:10px;color:#8DB5A5;letter-spacing:.1em">${importImages.length?"OPTIONAL EXTRA TEXT":"OR PASTE TEXT"}</div>
     <div style="flex:1;height:1px;background:rgba(255,255,255,0.06)"></div>
   </div>
+  ${importSettingsHtml()}
   <textarea id="it" class="inp" style="height:${importImages.length?"90":"170"}px;resize:vertical;padding:14px;font-size:13px;line-height:1.7;display:block;margin-bottom:12px" placeholder="Paste Arabic text here…"></textarea>
   <button class="btn1" id="ib" onclick="RI()" style="width:100%;justify-content:center;background:linear-gradient(135deg,#D9B45E,#D9B45E)"${!hasKey?" disabled":""}>${btnLabel}</button>`;
 }
