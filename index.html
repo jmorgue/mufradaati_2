@@ -996,7 +996,7 @@ async function loadProgressFromDB(){
           nextReview:r.next_review,
           queuedAt:r.queued_at?new Date(r.queued_at).getTime():null,
           bonusReviewedAt:r.bonus_reviewed_at?new Date(r.bonus_reviewed_at).getTime():null,
-          bonusCorrect:r.bonus_correct||0,
+          stars:r.bonus_correct||0,
           bonusWrong:r.bonus_wrong||0
         };
       }
@@ -1005,7 +1005,7 @@ async function loadProgressFromDB(){
       // Register what the SERVER currently has as the synced baseline — even
       // when we kept local instead, so the diff correctly sees local != this
       // stale baseline and re-uploads on the next save.
-      lastSyncedProg[r.word_id]=progSyncSnap({leitnerLevel:lvl,nextReview:r.next_review,queuedAt:r.queued_at?new Date(r.queued_at).getTime():null,bonusReviewedAt:r.bonus_reviewed_at?new Date(r.bonus_reviewed_at).getTime():null,bonusCorrect:r.bonus_correct||0,bonusWrong:r.bonus_wrong||0});
+      lastSyncedProg[r.word_id]=progSyncSnap({leitnerLevel:lvl,nextReview:r.next_review,queuedAt:r.queued_at?new Date(r.queued_at).getTime():null,bonusReviewedAt:r.bonus_reviewed_at?new Date(r.bonus_reviewed_at).getTime():null,stars:r.bonus_correct||0,bonusWrong:r.bonus_wrong||0});
     });
     console.log(`[Load] ${applied} progress rows applied${usedFallback?" (bonus columns missing — run the migration)":""}`);
     if(skipped.length)console.warn("[Load] unrecognized levels skipped:",[...new Set(skipped)]);
@@ -1029,7 +1029,7 @@ function progSyncSnap(v){
     next_review:v.nextReview==null?null:v.nextReview,
     queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,
     bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,
-    bonus_correct:v.bonusCorrect||0,
+    bonus_correct:v.stars||0,
     bonus_wrong:v.bonusWrong||0
   });
 }
@@ -1070,7 +1070,7 @@ async function saveProgressToDB(){
         next_review:(v.nextReview==null)?Date.now():v.nextReview,
         queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,
         bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,
-        bonus_correct:v.bonusCorrect||0,
+        bonus_correct:v.stars||0,
         bonus_wrong:v.bonusWrong||0,
         updated_at:new Date().toISOString()
       });
@@ -1975,7 +1975,7 @@ function rH(){
       <button onclick="addNFromVault()" title="Add ${n} word(s) from the Vault into ${lvi(vaultDest()).l}" style="padding:12px 16px;background:rgba(217,180,94,0.10);border:1px solid rgba(217,180,94,0.35);border-radius:10px;color:#D9B45E;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;flex-shrink:0">+${n} →</button>
     </div>`;
   })()}
-  ${masteredCount>0?`<button onclick="V('bonus-config')" style="width:100%;padding:12px;background:rgba(240,212,138,0.08);border:1px solid rgba(240,212,138,0.3);border-radius:10px;color:#F0D48A;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;margin-bottom:8px">⭐ Bonus Drill — Mastered Words (${masteredCount})</button>`:""}
+  ${masteredHomeHtml()}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
     <button class="btn2" style="padding:12px;text-align:center;width:100%" onclick="V('add')">+ Add Word</button>
     <button class="btn2" style="padding:12px;text-align:center;width:100%;color:#D9B45E;border-color:rgba(217,180,94,.35)" onclick="V('import')">✦ AI Import</button>
@@ -2161,7 +2161,7 @@ async function moveIdsToBox(ids,target){
   if(!ids||!ids.length||!target||!VI.has(target))return 0;
   const ordered=bw().filter(w=>ids.includes(w.id)).sort(byOrder);
   const now=Date.now();
-  ordered.forEach((w,i)=>{prog[w.id]={...(prog[w.id]||{}),leitnerLevel:target,nextReview:nrf(target)||now,queuedAt:now+i};});
+  ordered.forEach((w,i)=>{prog[w.id]={...(prog[w.id]||{}),leitnerLevel:target,nextReview:nrf(target)||now,queuedAt:now+i,...(target==="M"?{stars:0}:{})};});
   await saveProgressToDB();
   return ordered.length;
 }
@@ -2223,7 +2223,7 @@ async function moveSelectedTo(target){
 }
 function MW(id,d){const words=bw();const w=words.find(x=>x.id===id);if(!w)return;const ci=LV.findIndex(l=>l.id===w.leitnerLevel);const ni=Math.min(Math.max(ci+d,0),LV.length-1);const nl=LV[ni].id;prog[id]={leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now()};scheduleSync();R();}
 // Move a word by hand straight to any box; it lands at the end of that box.
-function MWto(id,nl){if(!nl||!VI.has(nl))return;prog[id]={...(prog[id]||{}),leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now()};scheduleSync();R();}
+function MWto(id,nl){if(!nl||!VI.has(nl))return;prog[id]={...(prog[id]||{}),leitnerLevel:nl,nextReview:nrf(nl)||Date.now(),queuedAt:Date.now(),...(nl==="M"?{stars:0}:{})};scheduleSync();R();}
 async function DW(id){await deleteWordCompletely(id);R();}
 
 // ── ADD ──
@@ -2234,7 +2234,7 @@ let bulkSource="add"; // "add" | "import" — which tab owns the pending cards
 let bulkSkipped=[];   // [{card, existing}] filtered out as already-known
 
 // Bonus session (drilling mastered words without affecting levels)
-let bRq=[], bRi=0, bRd="ar-en", bFl=false, bRr=[];
+let bRq=[], bRi=0, bRd="ar-en", bFl=false, bRr=[], bDaily=false, bDem=0;
 let bulkDialect="MSA";
 
 function rA(){
@@ -2884,7 +2884,7 @@ async function RC(a){
     // very same words at the front of every capped session.
     prog[card.id]={...(prog[card.id]||{}),leitnerLevel:level,nextReview:nowTs,queuedAt:nowTs,doneDay:today};
   }else{
-    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:correctDest(level),nextReview:nowTs,queuedAt:nowTs,doneDay:today};
+    prog[card.id]={...(prog[card.id]||{}),leitnerLevel:correctDest(level),nextReview:nowTs,queuedAt:nowTs,doneDay:today,...(correctDest(level)==="M"?{stars:0}:{})}; // a word entering Mastered starts with no stars
   }
   rr.push(a);
   if(window.statsLog)statsLog("rv",1,a==="again"?0:1);
@@ -2916,17 +2916,55 @@ function rD(){
   </div>`;
 }
 
-// ── BONUS SESSION (drilling mastered words, no level changes) ──
-// Mastered words carry a real 1-5 star rating plus a strike counter. Stars go
-// up/down with each answer; two consecutive wrong answers at 0 stars demotes
-// the word out of Mastered back to L5B and wipes its star record. This is the
-// ONLY way a Mastered word ever moves.
-function bonusStars(p){return Math.max(0,Math.min(5,p?.stars||0));}
+// ── MASTERED REVIEW (the daily set + extra drills; levels never change except a demotion) ──
+// Mastered words are graded with just two keys, no "stay":
+//   L  +1 star (the way you track how well a word is mastered)
+//   J  −1 star; a word with NO stars left drops back to the L5 Queue instead
+// Stars live on the progress row (synced in the bonus_correct column) and only
+// count while the word is Mastered; a word that re-enters Mastered starts at 0.
+const STAR_CAP=0;          // 0 = no maximum; set e.g. 10 to cap
+const DAILY_MASTERED=20;   // random mastered words offered each day
+function bonusStars(p){
+  if(!p||p.leitnerLevel!=="M")return 0;
+  const n=Math.max(0,Math.floor(p.stars||0));
+  return STAR_CAP?Math.min(STAR_CAP,n):n;
+}
+function starsLabel(n){return n<=0?"☆ no stars":n<=8?"★".repeat(n):"★ ×"+n;}
 function shuffleInPlace(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+// Today's random set: chosen once per day and remembered, so reloading the page
+// (or finishing half and coming back) never re-rolls it. Words you grade, in the
+// daily set or an extra round, drop off the list for the rest of the day.
+function dailyKey(){return"mufradat-mastered-daily-"+(CU?CU.username:"");}
+function dailyMasteredState(){
+  const t=dayKey(),pool=bw().filter(w=>w.leitnerLevel==="M").map(w=>w.id);
+  let s=gLS(dailyKey());
+  if(!s||s.day!==t)s={day:t,ids:[],done:[]};
+  if(s.ids.length<DAILY_MASTERED&&pool.length){ // fresh day, or the deck was still loading
+    const have=new Set(s.ids);
+    s.ids=s.ids.concat(shuffleInPlace(pool.filter(id=>!have.has(id))).slice(0,DAILY_MASTERED-s.ids.length));
+    sLS(dailyKey(),s);
+  }
+  return s;
+}
+function dailyMasteredLeft(){
+  const s=dailyMasteredState(),done=new Set(s.done),by=new Map(bw().map(w=>[w.id,w]));
+  return{total:s.ids.length,left:s.ids.filter(id=>!done.has(id)&&by.get(id)&&by.get(id).leitnerLevel==="M").map(id=>by.get(id))};
+}
+function markDailyDone(id){
+  const s=dailyMasteredState();
+  if(!s.done.includes(id)){s.done.push(id);sLS(dailyKey(),s);}
+}
+function startDailyMastered(){
+  const d=dailyMasteredLeft();
+  if(!d.left.length){toast(d.total?"Today's mastered review is done ✓":"No mastered words yet — keep reviewing!","#D9B45E");return;}
+  bRq=d.left;bRi=0;bFl=false;bRr=[];bRd="ar-en";bDaily=true;bDem=0;
+  V("bonus");
+}
+// Extra rounds: never-drilled first, then fewest stars, then least recently drilled.
 function pickBonusWords(count){
   const mastered=bw().filter(w=>w.leitnerLevel==="M");
   if(!mastered.length)return [];
-  // Never-quizzed first (shuffled), then fewest stars, then least-recently-quizzed
   const never=shuffleInPlace(mastered.filter(w=>!prog[w.id]?.bonusReviewedAt));
   const been=shuffleInPlace(mastered.filter(w=>prog[w.id]?.bonusReviewedAt)).sort((a,b)=>{
     const sa=bonusStars(prog[a.id]),sb=bonusStars(prog[b.id]);
@@ -2944,31 +2982,34 @@ function startBonusSession(){
   const count=requested==="all"?masteredTotal:Math.min(parseInt(requested,10),masteredTotal);
   const picked=pickBonusWords(count);
   if(!picked.length){toast("No mastered words yet — keep reviewing!","#D9B45E");return;}
-  bRq=picked;bRi=0;bFl=false;bRr=[];
+  bRq=picked;bRi=0;bFl=false;bRr=[];bDaily=false;bDem=0;
   V("bonus");
 }
-function gradeBonusCard(correct){
+// plus=true → L (+1 star). plus=false → J (−1 star, or down to the L5 Queue at 0).
+function gradeBonusCard(plus){
   const card=bRq[bRi];if(!card)return;
-  const cur=prog[card.id]||{leitnerLevel:"M"};
-  const stars=bonusStars(cur),strikes=cur.strikes||0;
-  if(correct){
-    prog[card.id]={...cur,leitnerLevel:"M",bonusReviewedAt:Date.now(),stars:Math.min(5,stars+1),strikes:0};
+  const now=Date.now(),cur=prog[card.id]||{leitnerLevel:"M"};
+  const stars=bonusStars(cur);
+  let res;
+  if(plus){
+    prog[card.id]={...cur,leitnerLevel:"M",bonusReviewedAt:now,stars:STAR_CAP?Math.min(STAR_CAP,stars+1):stars+1};
+    res="plus";
   }else if(stars>0){
-    prog[card.id]={...cur,leitnerLevel:"M",bonusReviewedAt:Date.now(),stars:stars-1,strikes:0};
-  }else if(strikes+1>=2){
-    // Two strikes at 0 stars — out of Mastered, star record wiped.
-    prog[card.id]={leitnerLevel:"L5B",nextReview:Date.now(),queuedAt:Date.now()};
+    prog[card.id]={...cur,leitnerLevel:"M",bonusReviewedAt:now,stars:stars-1};
+    res="minus";
   }else{
-    prog[card.id]={...cur,leitnerLevel:"M",bonusReviewedAt:Date.now(),stars:0,strikes:strikes+1};
+    // No stars left to lose — back to the L5 Queue, star record wiped.
+    prog[card.id]={leitnerLevel:"L5A",nextReview:now,queuedAt:now};
+    res="demote";bDem++;
   }
-  bRr.push(correct?"right":"wrong");
+  markDailyDone(card.id);
+  bRr.push(res);
   bFl=false;
+  saveProgressToDB();
   if(bRi+1>=bRq.length){
-    saveProgressToDB();
     V("bonus-done");
   }else{
     bRi++;
-    saveProgressToDB(); // mid-session save (matches existing review behavior)
     R();
   }
 }
@@ -2978,6 +3019,18 @@ function endBonusSession(){
   }
   saveProgressToDB();
   V("home");
+}
+
+// Home: today's daily set, plus a button for extra rounds.
+function masteredHomeHtml(){
+  const total=bw().filter(w=>w.leitnerLevel==="M").length;
+  if(!total)return"";
+  const d=dailyMasteredLeft(),done=!d.left.length;
+  const label=done?`✓ Mastered review done today (${d.total})`:`⭐ Mastered review — ${d.left.length} left today`;
+  return`<div style="display:flex;gap:8px;margin-bottom:8px">
+    <button onclick="${done?"V('bonus-config')":"startDailyMastered()"}" style="flex:1;padding:12px;background:rgba(240,212,138,${done?"0.04":"0.10"});border:1px solid rgba(240,212,138,${done?"0.18":"0.4"});border-radius:10px;color:${done?"#8DB5A5":"#F0D48A"};cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;text-align:left;padding-left:16px">${label}</button>
+    <button onclick="V('bonus-config')" title="Extra mastered drill — pick how many" style="padding:12px 16px;background:rgba(240,212,138,0.06);border:1px solid rgba(240,212,138,0.25);border-radius:10px;color:#F0D48A;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;flex-shrink:0">More</button>
+  </div>`;
 }
 
 function rBonusConfig(){
@@ -2995,8 +3048,8 @@ function rBonusConfig(){
   const opts=counts.map(n=>`<option value="${n}">${n} words</option>`).join("");
   return`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
       <div>
-        <div style="font-size:17px;font-weight:600;color:#F0D48A">Bonus Drill</div>
-        <div style="font-size:11px;color:#8DB5A5;margin-top:3px">Practice your mastered vocab without changing levels</div>
+        <div style="font-size:17px;font-weight:600;color:#F0D48A">Extra Mastered Drill</div>
+        <div style="font-size:11px;color:#8DB5A5;margin-top:3px">On top of your daily ${DAILY_MASTERED}. L adds a star, J takes one away (no stars → L5 Queue).</div>
       </div>
       <button onclick="V('home')" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:13px">Cancel</button>
     </div>
@@ -3007,7 +3060,7 @@ function rBonusConfig(){
       <div style="display:flex;justify-content:space-between;font-size:12px;color:#8DB5A5;margin-bottom:14px">
         <span>Never drilled yet</span><span style="color:#F0D48A;font-weight:600">${neverBonused}</span>
       </div>
-      <div style="font-size:10px;color:#8DB5A5;line-height:1.5;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04)">Words you haven't drilled before show up first. After that, oldest-drilled first.</div>
+      <div style="font-size:10px;color:#8DB5A5;line-height:1.5;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04)">Extra rounds start with words you haven't drilled, then the ones with the fewest stars.</div>
     </div>
     <div style="margin-bottom:12px">
       <label class="lbl">How many words?</label>
@@ -3035,16 +3088,17 @@ function rBonus(){
   const frontStyle=isAr?arBig:"font-size:24px;color:#EEE8D5";
   const backStyle=isAr?"font-size:22px;color:#EEE8D5":arBig;
   const exStyle=isAr?arS(card):"";
-  const stars="★".repeat(bonusStars(prog[card.id]))+"☆".repeat(5-bonusStars(prog[card.id]));
+  const n=bonusStars(prog[card.id]);
+  const minusLbl=n>0?"Lose a star":"Demote to L5 Queue";
   return`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div style="font-size:11px;color:#8DB5A5">Bonus Drill · ${bRi+1} / ${bRq.length}</div>
+      <div style="font-size:11px;color:#8DB5A5">${bDaily?"Mastered review":"Extra drill"} · ${bRi+1} / ${bRq.length}</div>
       <button onclick="endBonusSession()" style="background:none;border:none;color:#8DB5A5;cursor:pointer;font-size:12px">End ✕</button>
     </div>
     <div style="height:4px;background:rgba(255,255,255,0.05);border-radius:2px;margin-bottom:18px;overflow:hidden">
       <div style="height:100%;background:#F0D48A;width:${Math.round((bRi/bRq.length)*100)}%;transition:width .2s"></div>
     </div>
     <div onclick="bFl=!bFl;R()" style="background:var(--panel);border:1px solid rgba(240,212,138,0.25);border-radius:18px;padding:36px 22px;margin-bottom:18px;text-align:center;cursor:pointer;min-height:220px;display:flex;flex-direction:column;justify-content:center">
-      <div style="font-size:10px;color:#F0D48A;letter-spacing:.2em;margin-bottom:6px">${stars}</div>
+      <div style="font-size:12px;color:${n>0?"#F0D48A":"#8DB5A5"};letter-spacing:.2em;margin-bottom:6px">${starsLabel(n)}</div>
       <div style="${frontStyle};margin-bottom:${bFl?14:0}px">${front}</div>
       ${bFl?`
         <div style="height:1px;background:rgba(255,255,255,0.08);margin:14px 0"></div>
@@ -3056,39 +3110,33 @@ function rBonus(){
     </div>
     ${bFl?`
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <button onclick="gradeBonusCard(false)" style="background:rgba(240,122,122,0.12);border:1px solid rgba(240,122,122,0.45);border-radius:10px;padding:14px;color:#F07A7A;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600">Missed</button>
-        <button onclick="gradeBonusCard(true)" style="background:rgba(95,211,160,0.15);border:1px solid #5FD3A0;border-radius:10px;padding:14px;color:#5FD3A0;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600">Got it</button>
+        <button onclick="gradeBonusCard(false)" style="background:rgba(240,122,122,0.12);border:1px solid rgba(240,122,122,0.45);border-radius:10px;padding:14px;color:#F07A7A;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600">${minusLbl}<div style="font-size:10px;opacity:.7;font-weight:400;margin-top:2px">J</div></button>
+        <button onclick="gradeBonusCard(true)" style="background:rgba(95,211,160,0.15);border:1px solid #5FD3A0;border-radius:10px;padding:14px;color:#5FD3A0;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600">Add a star<div style="font-size:10px;opacity:.7;font-weight:400;margin-top:2px">L</div></button>
       </div>
     `:`
-      <div style="text-align:center;color:#8DB5A5;font-size:11px">Recall, then tap card to reveal</div>
+      <div style="text-align:center;color:#8DB5A5;font-size:11px">Recall, then tap the card or press Space to reveal</div>
     `}`;
 }
 
 function rBonusDone(){
-  const right=bRr.filter(r=>r==="right").length;
-  const wrong=bRr.filter(r=>r==="wrong").length;
-  const pct=bRr.length?Math.round((right/bRr.length)*100):0;
+  const plus=bRr.filter(r=>r==="plus").length;
+  const minus=bRr.filter(r=>r==="minus").length;
+  const dem=bRr.filter(r=>r==="demote").length;
+  const pct=bRr.length?Math.round((plus/bRr.length)*100):0;
   const msg=pct>=90?"ممتاز!":pct>=70?"أحسنت!":pct>=50?"استمر!":"تدرب أكثر";
+  const left=dailyMasteredLeft().left.length;
+  const tile=(v,c,l)=>`<div style="background:var(--panel);border:1px solid ${c}33;border-radius:10px;padding:14px 8px"><div style="font-size:28px;font-weight:700;color:${c}">${v}</div><div style="font-size:10px;color:#8DB5A5;margin-top:3px;text-transform:uppercase;letter-spacing:.08em">${l}</div></div>`;
   return`<div style="text-align:center">
     <div style="font-family:'Mirza','Amiri',serif;direction:rtl;font-size:46px;color:#F0D48A;margin-bottom:8px">${msg}</div>
-    <div style="color:#8DB5A5;font-size:13px;margin-bottom:18px">${bRr.length} mastered word${bRr.length!==1?"s":""} drilled</div>
+    <div style="color:#8DB5A5;font-size:13px;margin-bottom:18px">${bRr.length} mastered word${bRr.length!==1?"s":""} reviewed</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:18px">
-      <div style="background:var(--panel);border:1px solid rgba(95,211,160,0.2);border-radius:10px;padding:14px 8px">
-        <div style="font-size:28px;font-weight:700;color:#5FD3A0">${right}</div>
-        <div style="font-size:10px;color:#8DB5A5;margin-top:3px;text-transform:uppercase;letter-spacing:.08em">Got it</div>
-      </div>
-      <div style="background:var(--panel);border:1px solid rgba(240,122,122,0.2);border-radius:10px;padding:14px 8px">
-        <div style="font-size:28px;font-weight:700;color:#F07A7A">${wrong}</div>
-        <div style="font-size:10px;color:#8DB5A5;margin-top:3px;text-transform:uppercase;letter-spacing:.08em">Missed</div>
-      </div>
-      <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.2);border-radius:10px;padding:14px 8px">
-        <div style="font-size:28px;font-weight:700;color:#D9B45E">${pct}%</div>
-        <div style="font-size:10px;color:#8DB5A5;margin-top:3px;text-transform:uppercase;letter-spacing:.08em">Accuracy</div>
-      </div>
+      ${tile("+"+plus,"#5FD3A0","Stars added")}
+      ${tile("−"+minus,"#D9B45E","Stars lost")}
+      ${tile(dem,"#F07A7A","To L5 Queue")}
     </div>
-    <div style="padding:10px 14px;background:rgba(95,211,160,0.08);border:1px solid rgba(95,211,160,0.2);border-radius:10px;margin-bottom:14px;font-size:12px;color:#5FD3A0">Levels unchanged · stats saved ✓</div>
+    <div style="padding:10px 14px;background:rgba(95,211,160,0.08);border:1px solid rgba(95,211,160,0.2);border-radius:10px;margin-bottom:14px;font-size:12px;color:#5FD3A0">${dem?`${dem} word${dem!==1?"s":""} sent back to the L5 Queue · `:""}${left?`${left} left in today's set · `:"Today's set is done · "}saved ✓</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <button class="btn2" onclick="V('bonus-config')" style="justify-content:center;display:flex">Another Round</button>
+      <button class="btn2" onclick="V('bonus-config')" style="justify-content:center;display:flex">Extra Round</button>
       <button class="btn2" onclick="V('home')" style="justify-content:center;display:flex">Home</button>
     </div>
   </div>`;
@@ -3950,7 +3998,7 @@ function ET(){const n=prompt("Set Level 1 word target:",wt);if(n&&parseInt(n)>0)
       try{fetch(`${SB_URL}/rest/v1/user_words?on_conflict=user_id,word_id`,{method:"POST",headers,body:JSON.stringify(wordRows.slice(i,i+CH)),keepalive:true}).catch(()=>{});}catch(e){}
     }
     const rows=Object.entries(prog).filter(([word_id,v])=>lastSyncedProg[word_id]!==progSyncSnap(v))
-      .map(([word_id,v])=>({user_id:CU.id,word_id,leitner_level:v.leitnerLevel,next_review:(v.nextReview==null)?Date.now():v.nextReview,queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,bonus_correct:v.bonusCorrect||0,bonus_wrong:v.bonusWrong||0,updated_at:new Date().toISOString()}));
+      .map(([word_id,v])=>({user_id:CU.id,word_id,leitner_level:v.leitnerLevel,next_review:(v.nextReview==null)?Date.now():v.nextReview,queued_at:v.queuedAt?new Date(v.queuedAt).toISOString():null,bonus_reviewed_at:v.bonusReviewedAt?new Date(v.bonusReviewedAt).toISOString():null,bonus_correct:v.stars||0,bonus_wrong:v.bonusWrong||0,updated_at:new Date().toISOString()}));
     for(let i=0;i<rows.length;i+=CH){
       try{fetch(`${SB_URL}/rest/v1/progress?on_conflict=user_id,word_id`,{method:"POST",headers,body:JSON.stringify(rows.slice(i,i+CH)),keepalive:true}).catch(()=>{});}catch(e){}
     }

@@ -108,6 +108,26 @@ window.rStats=function(){
       <text x="290" y="63" font-size="9" fill="${SAGE}" text-anchor="end">${esc(pts[pts.length-1][0])}: ${pts[pts.length-1][1]}</text></svg>`;
   }
 
+  // star distribution: mastered words only, x = stars, y = how many words
+  const starCounts=[];let starSum=0,starMax=0,mWords=0;
+  bw().forEach(w=>{
+    if(w.leitnerLevel!=="M")return;
+    const s=bonusStars(prog[w.id]);mWords++;starSum+=s;starMax=Math.max(starMax,s);
+    starCounts[s]=(starCounts[s]||0)+1;
+  });
+  const BARS=Math.min(starMax,15)+1; // 0..15, with 15 meaning "15 or more"
+  const bars=Array.from({length:BARS},(_,i)=>{let n=0;if(i<BARS-1||starMax<=15)n=starCounts[i]||0;else for(let s=i;s<=starMax;s++)n+=starCounts[s]||0;return n;});
+  const barTop=Math.max(1,...bars),bw_=Math.min(40,260/BARS);
+  const dist=!mWords?`<div style="font-size:12px;color:${SAGE}">No mastered words yet.</div>`:
+    `<svg viewBox="0 0 300 130" style="width:100%;height:auto" role="img" aria-label="Mastered words by number of stars">
+      ${bars.map((n,i)=>{const h=Math.round(n/barTop*84),x=20+(260/BARS)*i+((260/BARS)-bw_)/2;
+        return`<rect x="${x.toFixed(1)}" y="${104-h}" width="${bw_.toFixed(1)}" height="${h}" rx="3" fill="${i===0?ROSE:GOLD}" opacity="${n?1:.25}"/>
+        ${n?`<text x="${(x+bw_/2).toFixed(1)}" y="${100-h}" font-size="9" fill="${INK}" text-anchor="middle">${n}</text>`:""}
+        <text x="${(x+bw_/2).toFixed(1)}" y="118" font-size="9" fill="${SAGE}" text-anchor="middle">${i===BARS-1&&starMax>15?i+"+":i}</text>`;}).join("")}
+      <line x1="16" y1="104" x2="284" y2="104" stroke="rgba(255,255,255,0.15)"/>
+      <text x="150" y="129" font-size="9" fill="${SAGE}" text-anchor="middle">stars</text></svg>
+    <div style="font-size:11px;color:${SAGE};margin-top:6px">${mWords.toLocaleString()} mastered words · average ${(starSum/mWords).toFixed(1)} stars${starCounts[0]?` · <span style="color:${ROSE}">${starCounts[0].toLocaleString()} with none</span> (one miss sends them back to the L5 Queue)`:""}</div>`;
+
   // activity strip: last 28 days
   const strip=Array.from({length:28}).map((_,i)=>{
     const k=addDays(today,-(27-i)),day=days[k]||{};
@@ -151,6 +171,10 @@ window.rStats=function(){
     <div style="height:8px;border-radius:5px;background:rgba(255,255,255,0.08);overflow:hidden"><div style="width:${lp}%;height:100%;background:${GOLD}"></div></div>
   </div>
   <div style="font-size:11px;color:${SAGE};margin-bottom:18px">Milestones: ${LADDER.map(x=>x<=m?`<span style="color:${GOLD}">${x.toLocaleString()} ✓</span>`:x.toLocaleString()).join(" · ")}. A rough vocabulary-size ladder, not a proficiency score.</div>
+
+  ${sh("Mastery stars")}
+  <div style="background:var(--panel);border:1px solid rgba(217,180,94,0.18);border-radius:14px;padding:14px 16px;margin-bottom:6px">${dist}</div>
+  <div style="font-size:11px;color:${SAGE};margin-bottom:18px">Mastered words only. Each correct recall in the daily mastered review adds a star; each miss takes one away.</div>
 
   ${sh("Last 28 days")}
   <div style="display:flex;gap:3px;margin-bottom:4px;overflow-x:auto">${strip}</div>

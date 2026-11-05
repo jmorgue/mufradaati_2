@@ -42,8 +42,18 @@
   addEventListener("keydown",e=>{
     const t=e.target;
     if(t&&(/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName)||t.isContentEditable))return;
-    if(typeof view==="undefined"||view!=="review")return;
     const isSpace=e.code==="Space"||e.key===" "||e.key==="Spacebar";
+    // Mastered review: Space reveals, then L adds a star and J takes one away
+    // (a word with no stars drops back to the L5 Queue). There is no "stay".
+    if(typeof view!=="undefined"&&view==="bonus"){
+      if(isSpace&&!bFl){e.preventDefault();bFl=true;R();return;}
+      if(!bFl)return;
+      const bk=e.key.toLowerCase();
+      if(bk==="j"){e.preventDefault();gradeBonusCard(false);}
+      else if(bk==="l"){e.preventDefault();gradeBonusCard(true);}
+      return;
+    }
+    if(typeof view==="undefined"||view!=="review")return;
     if(isSpace&&!fl){e.preventDefault();FC();return;}
     if(!fl)return;
     const k=e.key.toLowerCase();
