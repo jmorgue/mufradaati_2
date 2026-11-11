@@ -2925,7 +2925,8 @@ function rD(){
 // Stars live on the progress row (synced in the bonus_correct column) and only
 // count while the word is Mastered; a word that re-enters Mastered starts at 0.
 const STAR_CAP=0;          // 0 = no maximum; set e.g. 10 to cap
-const DAILY_MASTERED=20;   // random mastered words offered each day
+const DAILY_MASTERED=20;   // mastered words offered each day: mostly the lowest-star ones...
+const DAILY_HIGHER=2;     // ...plus this many random picks from words that already have stars
 function bonusStars(p){
   if(!p||p.leitnerLevel!=="M")return 0;
   const n=Math.max(0,Math.floor(p.stars||0));
@@ -2954,8 +2955,15 @@ function dailyMasteredState(){
   // Today's list made by the older all-random rule: keep what's already done, redraw the rest.
   if(s.v!==2&&pool.length){s={day:t,ids:s.done.slice(),done:s.done,v:2};}
   if(s.ids.length<DAILY_MASTERED&&pool.length){ // fresh day, or the deck was still loading
-    const have=new Set(s.ids);
-    s.ids=s.ids.concat(lowestStarsFirst(pool.filter(id=>!have.has(id)),DAILY_MASTERED-s.ids.length));
+    const have=new Set(s.ids),need=DAILY_MASTERED-s.ids.length;
+    const open=pool.filter(id=>!have.has(id));
+    // a small random share of already-starred words, so they still come round...
+    const starred=open.filter(id=>bonusStars(prog[id])>0);
+    const already=s.ids.filter(id=>bonusStars(prog[id])>0).length;
+    const extra=shuffleInPlace(starred).slice(0,Math.min(need,Math.max(0,DAILY_HIGHER-already)));
+    const ex=new Set(extra);
+    // ...and everything else fewest-stars-first
+    s.ids=s.ids.concat(extra,lowestStarsFirst(open.filter(id=>!ex.has(id)),need-extra.length));
     sLS(dailyKey(),s);
   }
   return s;
