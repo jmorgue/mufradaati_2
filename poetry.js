@@ -106,6 +106,20 @@ Do not invent facts, anecdotes or quotations.`;
   const data=await callClaude({max_tokens:Math.min(8000,1800+160*verses.length),messages:[{role:"user",content:prompt}]});
   return parseJSON((data.content||[]).map(c=>c.text||"").join(""));
 }
+// Read the Arabic out of screenshots / photos of a poem. The result goes into the
+// text box so it can be checked before translating — handwriting and small vowel
+// marks are easy to misread.
+async function readImages(images){
+  const content=[...images.map(im=>({type:"image",source:{type:"base64",media_type:im.mediaType,data:im.base64}})),
+    {type:"text",text:`Transcribe the Arabic poem shown in ${images.length>1?"these images (in order)":"this image"}, exactly as written, keeping every diacritic (tashkeel) you can see. Do not translate, correct, complete or modernise anything.
+- Keep the verses in order. When a verse is printed as two halves (two columns, or one half above the other), put BOTH halves of that verse on ONE line, separated by three spaces. When each line is a full verse, one verse per line.
+- Skip page numbers, headers, footnotes, commentary, translations and any website or app interface.
+- If the image shows a title or poet's name, put them first as "TITLE: …" and "POET: …" lines (leave them out if not shown).
+- Return only the transcription, with no commentary.`}];
+  const data=await callClaude({max_tokens:4000,messages:[{role:"user",content}]});
+  return(data.content||[]).map(c=>c.text||"").join("").trim();
+}
+
 async function findSources(p){
   const q=`Find reliable web pages about the Arabic poem "${p.titleEn||p.title}"${p.poet&&p.poet!=="Unknown"?` by ${p.poet}`:""} (it begins: ${(p.verses[0]||[]).join(" ")}). Prefer encyclopedias, university or library pages, poetry archives and reputable Arabic literature sites. Reply with one or two sentences saying what you found.`;
   const data=await callClaude({max_tokens:1200,tools:[{type:"web_search_20250305",name:"web_search",max_uses:4}],messages:[{role:"user",content:q}]});
@@ -120,11 +134,56 @@ async function findSources(p){
 }
 
 /* ---------- state ---------- */
-const P={sel:null,adding:false,editing:false,mode:"read",rev:new Set(),busy:null,layout:"auto"};
+const P={sel:null,adding:false,editing:false,mode:"read",rev:new Set(),busy:null,layout:"auto",images:[],draft:{title:"",poet:"",text:""}};
+const MAX_IMG=4;
+// Keep what's typed in the Add form across the re-renders that adding/removing a picture causes.
+function snap(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:null;};
+  const t=g("po-title"),p=g("po-poet"),x=g("po-text");
+  if(t!==null)P.draft.title=t;if(p!==null)P.draft.poet=p;if(x!==null)P.draft.text=x;
+}
+async function addImgs(fileList){
+  const files=Array.from(fileList||[]).filter(f=>f.type.startsWith("image/"));
+  if(!files.length)return;
+  snap();
+  const room=MAX_IMG-P.images.length;
+  if(room<=0){toast(`Max ${MAX_IMG} images`,"#D9B45E");return;}
+  if(files.length>room)toast(`Only ${room} more image${room!==1?"s":""} allowed`,"#D9B45E");
+  for(const f of files.slice(0,room)){
+    try{P.images.push(await prepareImage(f));}catch(e){toast("Couldn't read that image","#F07A7A");}
+  }
+  R();
+}
 window.PO={
   open(id){P.sel=id;P.adding=false;P.editing=false;P.mode="read";P.rev=new Set();R();window.scrollTo(0,0);},
   back(){P.sel=null;P.adding=false;P.editing=false;R();},
-  add(){P.adding=true;P.sel=null;R();},
+  add(){P.adding=true;P.sel=null;P.images=[];P.draft={title:"",poet:"",text:""};R();},
+  pick(files){addImgs(files);},
+  rmImg(i){snap();P.images.splice(i,1);R();},
+  over(e){e.preventDefault();e.stopPropagation();const d=document.getElementById("po-drop");if(d)d.style.borderColor=GOLD;},
+  leave(e){e.preventDefault();e.stopPropagation();const d=document.getElementById("po-drop");if(d)d.style.borderColor="rgba(217,180,94,0.35)";},
+  drop(e){e.preventDefault();e.stopPropagation();PO.leave(e);addImgs(e.dataTransfer&&e.dataTransfer.files);},
+  async read(){
+    if(P.busy||!P.images.length)return;
+    snap();
+    if(P.draft.text.trim()&&!confirm("Replace the text in the box with what's read from the picture?"))return;
+    const btn=document.getElementById("po-read");
+    P.busy="read";if(btn){btn.disabled=true;btn.textContent="⏳ Reading the picture…";}
+    try{
+      let t=await readImages(P.images);
+      const m=k=>{const r=t.match(new RegExp("^\\s*"+k+"\\s*:\\s*(.+)$","im"));if(r){t=t.replace(r[0],"");return r[1].trim();}return"";};
+      const title=m("TITLE"),poet=m("POET");
+      if(title&&!P.draft.title.trim())P.draft.title=title;
+      if(poet&&!P.draft.poet.trim())P.draft.poet=poet;
+      P.draft.text=t.replace(/^\s*\n/,"").trim();
+      if(!P.draft.text)toast("Couldn't find any Arabic in the picture","#D9B45E");
+      else toast("Read ✓ — check it against the picture, then translate");
+    }catch(e){
+      console.error("[Poetry] read failed:",e);
+      toast(e.message&&e.message.length<90?e.message:"Could not read the picture","#F07A7A");
+    }
+    P.busy=null;R();
+  },
   setLayout(v){P.layout=v;},
   mode(m){P.mode=m;P.rev=new Set();R();},
   flip(i){if(P.rev.has(i))P.rev.delete(i);else P.rev.add(i);R();},
@@ -156,7 +215,7 @@ window.PO={
         era:a.era||"",topic:a.topic||"",
         verses:verses.map((v,i)=>({a:v[0],b:v[1],en:en[i]||""})).map(v=>[v.a,v.b,v.en]),
         background:a.background||"",meaning:a.meaning||"",notes:Array.isArray(a.notes)?a.notes.map(String):[],sources:[],ai:true};
-      put(p);P.busy=null;P.adding=false;P.sel=p.id;P.mode="read";P.rev=new Set();
+      put(p);P.busy=null;P.adding=false;P.sel=p.id;P.mode="read";P.rev=new Set();P.images=[];P.draft={title:"",poet:"",text:""};
       toast("Poem added ✓");
     }catch(e){
       console.error("[Poetry] failed:",e);
@@ -240,19 +299,26 @@ function rAdd(){
   const sel=(v,l)=>`<option value="${v}"${P.layout===v?" selected":""}>${l}</option>`;
   return`<button onclick="PO.back()" style="background:none;border:none;color:${SAGE};cursor:pointer;font-size:13px;margin-bottom:14px;padding:0">← Back</button>
   <div style="font-family:'Mirza','Amiri',serif;direction:rtl;font-size:26px;color:${GOLD};text-align:right;margin-bottom:6px">إِضَافَةُ قَصِيدَةٍ</div>
-  <div style="font-size:12px;color:${SAGE};margin-bottom:16px;line-height:1.6">Paste the Arabic of a poem. The translation and background are written by AI from what it knows, so treat them as a study aid and check them with the sources.</div>
+  <div style="font-size:12px;color:${SAGE};margin-bottom:16px;line-height:1.6">Paste the Arabic of a poem, or add a screenshot or photo and let AI read it. The translation and background are written by AI from what it knows, so treat them as a study aid and check them with the sources.</div>
   ${apiKey()?"":`<div style="padding:10px 14px;background:rgba(240,122,122,0.08);border:1px solid rgba(240,122,122,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;color:${ROSE}">No API key saved. <span style="cursor:pointer;text-decoration:underline" onclick="V('settings')">Add it in Settings →</span></div>`}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-    <div><label class="lbl">Title (optional)</label><input id="po-title" class="inp" placeholder="Leave blank to let AI name it"/></div>
-    <div><label class="lbl">Poet (optional)</label><input id="po-poet" class="inp" placeholder="Leave blank if unsure"/></div>
+    <div><label class="lbl">Title (optional)</label><input id="po-title" class="inp" value="${esc(P.draft.title)}" placeholder="Leave blank to let AI name it"/></div>
+    <div><label class="lbl">Poet (optional)</label><input id="po-poet" class="inp" value="${esc(P.draft.poet)}" placeholder="Leave blank if unsure"/></div>
   </div>
+  ${P.images.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${P.images.map((im,i)=>`<div style="position:relative;width:84px;height:84px;border-radius:10px;overflow:hidden;border:1px solid rgba(217,180,94,0.35)"><img src="${im.dataUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"/><button onclick="PO.rmImg(${i})" title="Remove" style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(4,20,15,0.85);border:1px solid rgba(240,122,122,0.5);color:${ROSE};cursor:pointer;font-size:13px;line-height:1;padding:0;font-family:inherit">×</button></div>`).join("")}</div>`:""}
+  ${P.images.length<MAX_IMG?`<div id="po-drop" ondrop="PO.drop(event)" ondragover="PO.over(event)" ondragleave="PO.leave(event)" onclick="document.getElementById('po-file').click()" style="border:1.5px dashed rgba(217,180,94,0.35);border-radius:12px;padding:14px;text-align:center;cursor:pointer;margin-bottom:10px;background:rgba(217,180,94,0.04)">
+    <div style="font-size:13px;color:${GOLD};font-weight:600">${P.images.length?"Add another picture":"🖼 Add a screenshot or photo of the poem"}</div>
+    <div style="font-size:11px;color:${SAGE};margin-top:3px;line-height:1.5">Tap to choose · drag &amp; drop · or press <strong>Ctrl/Cmd+V</strong> to paste</div></div>
+  <input type="file" id="po-file" accept="image/*" multiple style="display:none" onchange="PO.pick(this.files);this.value=''"/>`:""}
+  ${P.images.length?`<button class="btn2" id="po-read" onclick="PO.read()" style="width:100%;justify-content:center;display:flex;margin-bottom:6px"${apiKey()?"":" disabled"}>📖 Read the Arabic from the picture${P.images.length>1?"s":""}</button>
+  <div style="font-size:11px;color:${SAGE};margin-bottom:12px;line-height:1.5">The text lands in the box below. Check it against the picture — small vowel marks and handwriting are easy to misread — fix anything, then translate.</div>`:""}
   <div style="margin-bottom:12px"><label class="lbl">How is it laid out?</label>
     <select class="inp" style="cursor:pointer;font-size:13px;padding:10px 12px" onchange="PO.setLayout(this.value)">
       ${sel("auto","Auto — two halves on a line if they're separated, otherwise one verse per line")}
       ${sel("pair","One half per line — pair them up into verses")}
       ${sel("single","One verse per line — don't split")}
     </select></div>
-  <textarea id="po-text" class="inp" style="${AR}height:230px;resize:vertical;padding:14px;font-size:20px;line-height:2;display:block;margin-bottom:12px" placeholder="الصق القصيدة هنا…"></textarea>
+  <textarea id="po-text" class="inp" style="${AR}height:230px;resize:vertical;padding:14px;font-size:20px;line-height:2;display:block;margin-bottom:12px" placeholder="الصق القصيدة هنا…">${esc(P.draft.text)}</textarea>
   <button class="btn1" id="po-go" onclick="PO.create()" style="width:100%;justify-content:center"${apiKey()?"":" disabled"}>✦ Translate &amp; explain</button>`;
 }
 
@@ -301,6 +367,16 @@ function rPoem(p){
   <div style="display:flex;gap:8px;justify-content:center;margin-bottom:10px">${btn("＋ Words from this poem","PO.words()")}</div>
   <div style="font-size:11px;color:${SAGE};text-align:center">Sends the Arabic to AI Import so you can pick words for the Vault.</div>`;
 }
+
+// Ctrl/Cmd+V of a screenshot while the Add form is open.
+document.addEventListener("paste",e=>{
+  if(typeof view==="undefined"||view!=="poetry"||!P.adding)return;
+  const files=[];
+  for(const it of (e.clipboardData&&e.clipboardData.items)||[]){
+    if(it.kind==="file"&&it.type.startsWith("image/")){const f=it.getAsFile();if(f)files.push(f);}
+  }
+  if(files.length){e.preventDefault();addImgs(files);toast(`${files.length} image${files.length!==1?"s":""} pasted ✓`);}
+});
 
 window.rPoetry=function(){
   if(!pulled)pull();
